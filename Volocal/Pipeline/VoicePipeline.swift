@@ -1,274 +1,373 @@
+// Volocal/Pipeline/VoicePipeline.swift
+// Protocol-driven voice pipeline.
+//
+// Changes from original:
+//   • Holds ASRProvider and LLMProvider protocols — no concrete llama.cpp or
+//     Parakeet types leak into this file.
+//   • Observes MemoryPressureMonitor and hot-swaps the LLM tier when needed.
+//   • Sequential loading: STT first, LLM only on first speech detected.
+//   • ScenePhase.background → LLM unloads to free GPU memory.
+//   • Thai and multilingual support via WhisperASRProvider without any
+//     pipeline logic changes.
+//
+// Pipeline flow (unchanged from original):
+//   Mic → SharedAudioEngine → ASRProvider → VoicePipeline → LLMProvider
+//                                    ↑                           │
+//                               barge-in               SentenceBuffer
+//                                                           ↓
+//                                                     PocketTTSManager → Speaker
+
 import Foundation
+import SwiftUI
 import Combine
-import os
+import FluidAudio    // PocketTtsManager, VadManager
+import AVFoundation
 
-private let logger = Logger(subsystem: "com.volocal.app", category: "pipeline")
+// MARK: - Pipeline State
 
-/// Orchestrates the full voice pipeline: STT -> LLM -> TTS
-/// Listens for completed utterances from STT, generates LLM responses,
-/// buffers into sentences, and sends to TTS for playback.
-/// Supports barge-in: user can speak while AI is talking to interrupt.
+public enum PipelineState: String, Equatable {
+    case idle
+    case listening          // ASR active, waiting for speech
+    case transcribing       // ASR processing
+    case thinking           // LLM generating
+    case speaking           // TTS outputting
+    case error
+}
+
+// MARK: - Conversation Turn
+
+public struct ConversationTurn: Identifiable {
+    public let id = UUID()
+    public let role: ChatMessage.Role
+    public var content: String
+    public let timestamp: Date
+    public let asrProvider: String?   // for debug overlay
+
+    public init(role: ChatMessage.Role, content: String, asrProvider: String? = nil) {
+        self.role = role
+        self.content = content
+        self.timestamp = .now
+        self.asrProvider = asrProvider
+    }
+}
+
+// MARK: - VoicePipeline
+
 @MainActor
-final class VoicePipeline: ObservableObject {
-    @Published var state: PipelineState = .idle
-    @Published var conversationHistory: [ConversationMessage] = []
-    @Published var currentTranscript: String = ""
-    @Published var currentResponse: String = ""
-    @Published var loadingStatus: String?
-    @Published var isReady: Bool = false
-    @Published var partialTranscript: String = ""
-    @Published var currentError: String?
+public final class VoicePipeline: ObservableObject {
 
-    let sttManager = STTManager()
-    let llmManager = LLMManager()
-    let ttsManager = TTSManager()
-    let sharedAudio = SharedAudioEngine()
-    private let sentenceBuffer = SentenceBuffer()
+    // MARK: Published UI State
 
-    private var generationTask: Task<Void, Never>?
-    private var sentenceQueue: [String] = []
-    private var speakingTask: Task<Void, Never>?
-    private var turnRevision: Int = 0
+    @Published public private(set) var state: PipelineState = .idle
+    @Published public private(set) var conversation: [ConversationTurn] = []
+    @Published public private(set) var partialTranscript: String = ""
+    @Published public private(set) var partialResponse: String = ""
+    @Published public private(set) var tokensPerSecond: Double = 0
+    @Published public private(set) var isLLMLoaded = false
+
+    // MARK: Dependencies (protocol types only)
+
+    private var asrProvider: any ASRProvider
+    private var llmProvider: any LLMProvider
+    private let ttsManager: PocketTtsManager
+    private let audioEngine: SharedAudioEngine
+    private let memoryMonitor: MemoryPressureMonitor
+    private var config: ModelConfiguration
+
+    // MARK: Private State
+
+    private var currentTurnRevision = 0
+    private var llmTask: Task<Void, Never>?
+    private var sentenceBuffer = SentenceBuffer()
+    private var historyMessages: [ChatMessage] = []
     private var cancellables = Set<AnyCancellable>()
+    private var llmLoadTask: Task<Void, Never>?
 
-    /// Maximum conversation history entries (system prompt excluded).
-    /// Each exchange is 2 entries (user + assistant). Keep last ~4 exchanges.
-    private let maxHistoryEntries = 8
+    // MARK: System Prompt
 
-    enum PipelineState: Equatable {
-        case idle
-        case listening
-        case processing
-        case speaking
+    private let systemPrompt: String
 
-        var label: String {
-            switch self {
-            case .idle: return "Tap to start"
-            case .listening: return "Listening..."
-            case .processing: return "Thinking..."
-            case .speaking: return "Speaking..."
+    // MARK: Init
+
+    public init(
+        config: ModelConfiguration = .current,
+        audioEngine: SharedAudioEngine,
+        memoryMonitor: MemoryPressureMonitor,
+        systemPrompt: String = """
+        You are a helpful voice assistant. Respond concisely in 1–3 sentences.
+        Match the language of the user's message.
+        """
+    ) {
+        self.config = config
+        self.audioEngine = audioEngine
+        self.memoryMonitor = memoryMonitor
+        self.systemPrompt = systemPrompt
+
+        // Instantiate concrete providers from configuration
+        self.asrProvider = config.makeASRProvider()
+        self.llmProvider = config.makeLLMProvider()
+        self.ttsManager = PocketTtsManager(language: .english)
+
+        bindMemoryMonitor()
+    }
+
+    // MARK: Lifecycle
+
+    /// Prepare STT and TTS.  Defer LLM load until first speech detected.
+    public func start() async throws {
+        // 1. Warm up STT
+        try await asrProvider.prepare()
+        wireASRCallbacks()
+
+        // 2. Warm up TTS
+        try await ttsManager.initialize()
+
+        // 3. Start audio capture
+        audioEngine.onAudioBuffer = { [weak self] samples in
+            Task { [weak self] in
+                try? await self?.asrProvider.appendAudioSamples(samples)
             }
         }
-    }
+        try audioEngine.start()
 
-    init() {
-        setupCallbacks()
-        // Forward partial transcript from STT manager
-        sttManager.$partialResult
-            .receive(on: DispatchQueue.main)
-            .assign(to: &$partialTranscript)
-    }
-
-    var metrics: SystemMetrics?
-
-    func configure(llmModelPath: String?) async {
-        // Start shared audio engine
-        sharedAudio.start()
-
-        // Inject shared audio into managers
-        sttManager.sharedAudio = sharedAudio
-        ttsManager.sharedAudio = sharedAudio
-
-        loadingStatus = "Loading speech recognition..."
-        metrics?.beginTracking("STT (Parakeet EOU)")
-        await sttManager.initialize()
-        metrics?.endTracking("STT (Parakeet EOU)")
-
-        loadingStatus = "Loading language model..."
-        if let path = llmModelPath {
-            metrics?.beginTracking("LLM (llama.cpp)")
-            do {
-                try await llmManager.loadModel(path: path)
-            } catch {
-                logger.error("LLM load failed: \(error.localizedDescription)")
-                currentError = "LLM failed to load: \(error.localizedDescription)"
-                loadingStatus = nil
-                // Don't set isReady — stay on loading screen with error
-                return
-            }
-            metrics?.endTracking("LLM (llama.cpp)")
-        }
-
-        loadingStatus = "Loading text-to-speech..."
-        ttsManager.metrics = metrics
-        await ttsManager.initialize()
-
-        loadingStatus = nil
-        isReady = true
-    }
-
-    func toggleListening() {
-        switch state {
-        case .idle:
-            startListening()
-        case .listening:
-            stopListening()
-        case .processing, .speaking:
-            interrupt()
-        }
-    }
-
-    func resetChat() {
-        if state == .processing || state == .speaking {
-            interrupt()
-        }
-        if state == .listening {
-            stopListening()
-        }
-        conversationHistory.removeAll()
-        currentTranscript = ""
-        currentResponse = ""
-        currentError = nil
-    }
-
-    // MARK: - Pipeline Control
-
-    private func startListening() {
+        // 4. Begin ASR (lazy LLM load below)
+        try await asrProvider.startStreaming(language: config.asrLanguage)
         state = .listening
-        currentTranscript = ""
-        currentError = nil
-        sttManager.startListening()
     }
 
-    private func stopListening() {
-        sttManager.stopListening()
+    public func stop() async {
+        try? await asrProvider.stopStreaming()
+        llmTask?.cancel()
+        await llmProvider.unload()
+        audioEngine.stop()
         state = .idle
+        isLLMLoaded = false
     }
 
-    private func interrupt() {
-        turnRevision += 1
-        ttsManager.stop()
-        llmManager.stopGeneration()
-        generationTask?.cancel()
-        generationTask = nil
-        speakingTask?.cancel()
-        speakingTask = nil
-        sentenceQueue.removeAll()
-        sentenceBuffer.reset()
-        currentResponse = ""
-        // Don't stop STT — mic stays open for barge-in
-        state = .listening
-    }
+    // MARK: Configuration Hot-Swap
 
-    // MARK: - Callbacks
+    /// Swap ASR/LLM providers at runtime (e.g., when user changes language).
+    public func reconfigure(with newConfig: ModelConfiguration) async throws {
+        guard newConfig != config else { return }
 
-    private func setupCallbacks() {
-        sttManager.onUtteranceCompleted = { [weak self] text in
-            Task { @MainActor in
-                self?.handleUtterance(text)
-            }
-        }
+        let wasListening = state == .listening
 
-        sttManager.onSpeechDetected = { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                // Barge-in: user started speaking while AI is active
-                if self.state == .processing || self.state == .speaking {
-                    self.interrupt()
-                }
-            }
-        }
+        // Teardown current providers
+        try? await asrProvider.stopStreaming()
+        await asrProvider.unload()
+        await llmProvider.unload()
+        isLLMLoaded = false
 
-        sentenceBuffer.onSentenceReady = { [weak self] sentence in
-            Task { @MainActor in
-                self?.handleSentence(sentence)
-            }
-        }
-    }
+        // Rebuild
+        config = newConfig
+        asrProvider = newConfig.makeASRProvider()
+        llmProvider = newConfig.makeLLMProvider()
 
-    private func handleUtterance(_ text: String) {
-        // If AI is still active, interrupt first
-        if state == .processing || state == .speaking {
-            interrupt()
-        }
-        guard state == .listening else { return }
+        try await asrProvider.prepare()
+        wireASRCallbacks()
 
-        turnRevision += 1
-        let myRevision = turnRevision
-
-        let userMessage = ConversationMessage(role: .user, text: text)
-        conversationHistory.append(userMessage)
-        currentTranscript = text
-
-        // Forward partial transcript
-        partialTranscript = sttManager.partialResult
-
-        // Reset ASR for next utterance (mic stays open)
-        sttManager.resetForNextUtterance()
-
-        state = .processing
-        currentResponse = ""
-        sentenceBuffer.reset()
-        sentenceQueue.removeAll()
-
-        generationTask = Task {
-            // History already includes the user message we just appended.
-            // generate() should NOT re-append the prompt.
-            for await token in llmManager.generate(history: conversationHistory) {
-                guard !Task.isCancelled, myRevision == turnRevision else { break }
-                currentResponse += token
-                sentenceBuffer.append(token)
-            }
-
-            guard !Task.isCancelled, myRevision == turnRevision else { return }
-
-            sentenceBuffer.flush()
-
-            // Only append non-empty assistant messages
-            if !currentResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let assistantMessage = ConversationMessage(role: .assistant, text: currentResponse)
-                conversationHistory.append(assistantMessage)
-                trimHistory()
-            }
-            // Clear so the partial response bubble disappears
-            // (the response is now in conversationHistory)
-            currentResponse = ""
-
-            // Wait for all queued sentences to finish speaking (with timeout)
-            let waitStart = CFAbsoluteTimeGetCurrent()
-            let waitTimeout: TimeInterval = 60
-            while speakingTask != nil && !Task.isCancelled && myRevision == turnRevision {
-                if CFAbsoluteTimeGetCurrent() - waitStart > waitTimeout {
-                    logger.warning("Speaking wait timeout after \(waitTimeout)s")
-                    break
-                }
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-
-            guard !Task.isCancelled, myRevision == turnRevision else { return }
+        if wasListening {
+            try await asrProvider.startStreaming(language: newConfig.asrLanguage)
             state = .listening
         }
+
+        ModelConfiguration.current = newConfig
     }
 
-    private func handleSentence(_ sentence: String) {
-        sentenceQueue.append(sentence)
-        processNextSentence()
-    }
+    // MARK: App Lifecycle — Background / Foreground
 
-    private func processNextSentence() {
-        guard speakingTask == nil, !sentenceQueue.isEmpty else { return }
-        guard !Task.isCancelled else { return }
-
-        let sentence = sentenceQueue.removeFirst()
-        let myRevision = turnRevision
-        state = .speaking
-        speakingTask = Task {
-            await ttsManager.speak(sentence)
-            guard !Task.isCancelled, myRevision == turnRevision else { return }
-            speakingTask = nil
-            processNextSentence()
+    public func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            // Unload the LLM to free ~1.26 GB of GPU memory.
+            // Re-load lazily when user returns and speaks.
+            llmTask?.cancel()
+            Task { [weak self] in
+                await self?.llmProvider.unload()
+                await MainActor.run { self?.isLLMLoaded = false }
+            }
+        case .active:
+            // ASR stays warm.  LLM will reload on next EOU event.
+            break
+        default:
+            break
         }
     }
 
-    /// Trim conversation history to prevent context overflow.
-    /// Keeps the most recent exchanges within maxHistoryEntries.
-    private func trimHistory() {
-        while conversationHistory.count > maxHistoryEntries {
-            conversationHistory.removeFirst()
-            // Remove in pairs if possible to keep user/assistant aligned
-            if !conversationHistory.isEmpty && conversationHistory.first?.role == .assistant {
-                conversationHistory.removeFirst()
+    // MARK: Barge-In
+
+    public func bargeIn() {
+        currentTurnRevision += 1
+        llmTask?.cancel()
+        ttsManager.stop()
+        sentenceBuffer.clear()
+        partialResponse = ""
+        state = .listening
+    }
+
+    // MARK: Private — ASR Callbacks
+
+    private func wireASRCallbacks() {
+        asrProvider.onResult = { [weak self] result in
+            guard let self else { return }
+            self.partialTranscript = result.text
+            if result.isEndOfUtterance {
+                self.handleEndOfUtterance(text: result.text, providerName: result.providerName)
             }
         }
+        asrProvider.onEndOfUtterance = { /* handled in onResult */ }
+        asrProvider.onError = { [weak self] error in
+            print("[ASR] Error: \(error)")
+            self?.state = .error
+        }
+    }
+
+    // MARK: Private — EOU → LLM → TTS
+
+    private func handleEndOfUtterance(text: String, providerName: String) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let revision = currentTurnRevision
+        let userTurn = ConversationTurn(role: .user, content: text, asrProvider: providerName)
+        conversation.append(userTurn)
+        historyMessages.append(ChatMessage(role: .user, content: text))
+        partialTranscript = ""
+        state = .thinking
+
+        llmTask = Task { [weak self] in
+            guard let self else { return }
+
+            // Lazy-load the LLM on first use
+            if !self.isLLMLoaded {
+                do {
+                    try await self.llmProvider.prepare()
+                    self.isLLMLoaded = true
+                } catch {
+                    print("[LLM] Load failed: \(error)")
+                    self.state = .error
+                    return
+                }
+            }
+
+            guard !Task.isCancelled, self.currentTurnRevision == revision else { return }
+
+            var assistantTurn = ConversationTurn(role: .assistant, content: "")
+            self.conversation.append(assistantTurn)
+            let assistantIdx = self.conversation.count - 1
+
+            var fullResponse = ""
+            var sentenceAcc = ""
+
+            let stream = self.llmProvider.generate(
+                messages: self.historyMessages,
+                systemPrompt: self.systemPrompt
+            )
+
+            do {
+                for try await token in stream {
+                    guard !Task.isCancelled, self.currentTurnRevision == revision else { break }
+
+                    if token.isLast { break }
+                    fullResponse += token.text
+                    sentenceAcc += token.text
+                    self.partialResponse = fullResponse
+                    self.conversation[assistantIdx].content = fullResponse
+                    self.tokensPerSecond = self.llmProvider.tokensPerSecond
+
+                    // Feed sentence chunks to TTS as they complete
+                    if let sentence = self.sentenceBuffer.append(token.text) {
+                        self.state = .speaking
+                        let audio = try await self.ttsManager.synthesize(text: sentence)
+                        await self.audioEngine.playAudio(audio)
+                    }
+                }
+            } catch {
+                if !Task.isCancelled { print("[LLM] Generation error: \(error)") }
+            }
+
+            guard !Task.isCancelled, self.currentTurnRevision == revision else { return }
+
+            // Flush remaining partial sentence
+            if let remainder = self.sentenceBuffer.flush(), !remainder.isEmpty {
+                let audio = try? await self.ttsManager.synthesize(text: remainder)
+                if let audio { await self.audioEngine.playAudio(audio) }
+            }
+
+            self.historyMessages.append(ChatMessage(role: .assistant, content: fullResponse))
+            self.partialResponse = ""
+            self.state = .listening
+
+            // Resume ASR for next turn
+            try? await self.asrProvider.startStreaming(language: self.config.asrLanguage)
+        }
+    }
+
+    // MARK: Private — Memory Monitor Binding
+
+    private func bindMemoryMonitor() {
+        memoryMonitor.onTierChange = { [weak self] newTier in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Only switch if LLM is not currently mid-generation
+                guard self.state != .thinking && self.state != .speaking else { return }
+                let newLLMBackend: LLMBackend = newTier == .lite ? .qwen0_8B : .qwen2B
+                guard newLLMBackend.rawValue != self.config.llmBackend.rawValue else { return }
+                let newConfig = ModelConfiguration(
+                    asrBackend: self.config.asrBackend,
+                    asrLanguage: self.config.asrLanguage,
+                    llmBackend: newLLMBackend
+                )
+                try? await self.reconfigure(with: newConfig)
+            }
+        }
+
+        memoryMonitor.onCriticalPressure = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Critical: unload LLM immediately if not generating
+                if self.state == .listening || self.state == .idle {
+                    self.llmTask?.cancel()
+                    await self.llmProvider.unload()
+                    self.isLLMLoaded = false
+                }
+            }
+        }
+    }
+}
+
+// MARK: - SentenceBuffer
+
+/// Accumulates streaming LLM tokens and emits complete sentences for TTS.
+private final class SentenceBuffer {
+    private var buffer = ""
+    private let terminators: Set<Character> = [".", "!", "?", ":", ";"]
+    private let maxLength = 200
+
+    func append(_ token: String) -> String? {
+        buffer += token
+        if let idx = buffer.lastIndex(where: { terminators.contains($0) }),
+           buffer.count > 10
+        {
+            let sentence = String(buffer[...idx]).trimmingCharacters(in: .whitespaces)
+            buffer = String(buffer[buffer.index(after: idx)...])
+            return sentence.isEmpty ? nil : sentence
+        }
+        if buffer.count > maxLength {
+            let sentence = buffer.trimmingCharacters(in: .whitespaces)
+            buffer = ""
+            return sentence.isEmpty ? nil : sentence
+        }
+        return nil
+    }
+
+    func flush() -> String? {
+        let sentence = buffer.trimmingCharacters(in: .whitespaces)
+        buffer = ""
+        return sentence.isEmpty ? nil : sentence
+    }
+
+    func clear() {
+        buffer = ""
     }
 }

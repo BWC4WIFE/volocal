@@ -1,0 +1,60 @@
+# .github/workflows/build.yml
+name: iOS Build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # Cache Swift Package Manager dependencies
+      - name: Cache SwiftPM packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      # Cache Xcode DerivedData to speed up compilation
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-deriveddata-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
+
+      - name: Set up Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build the app
+        run: |
+          xcodebuild \
+            -scheme Volocal \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,name=iPhone 15" \
+            clean build
+        env:
+          PROJECT_DIR: ${{ github.workspace }}
+
+      - name: Run unit tests (if any)
+        run: |
+          xcodebuild \
+            -scheme Volocal \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,name=iPhone 15" \
+            test
+        env:
+          PROJECT_DIR: ${{ github.workspace }}
