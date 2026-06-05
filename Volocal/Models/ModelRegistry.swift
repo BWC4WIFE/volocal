@@ -1,74 +1,93 @@
+// Volocal/Models/ModelRegistry+Thai.swift
+// Extends the existing ModelRegistry with Thai-specific WhisperKit model entries.
+//
+// These entries drive the download manager UI — the same progress bars and
+// storage checks that show for Parakeet/PocketTTS will also appear for
+// Whisper Small/Medium when the Thai configuration is active.
+
 import Foundation
 
-/// Central registry of all models used by Volocal.
-/// Defines metadata, download sources, and local paths.
-enum ModelRegistry {
-    /// All model types used in the app
-    enum ModelType: String, CaseIterable, Identifiable {
-        case llm
-        case stt
-        case tts
+// MARK: - Model Entry Extension
 
-        var id: String { rawValue }
+extension ModelEntry {
+    // MARK: WhisperKit Thai Entries
 
-        var displayName: String {
-            switch self {
-            case .llm: return "Language Model"
-            case .stt: return "Speech Recognition"
-            case .tts: return "Text-to-Speech"
-            }
-        }
+    /// Whisper Small CoreML — recommended for Thai.
+    static let whisperSmallThai = ModelEntry(
+        id: "whisper-small-th",
+        displayName: "Whisper Small (Thai / Multilingual)",
+        description: "OpenAI Whisper Small converted to CoreML. Supports Thai and 99 other languages.",
+        sizeBytes: 290 * 1_048_576,
+        huggingFaceRepo: "argmaxinc/whisperkit-coreml",
+        filename: "openai_whisper-small",
+        isDirectory: true,   // WhisperKit downloads a directory of .mlpackage files
+        requiredFor: [.thai]
+    )
 
-        var icon: String {
-            switch self {
-            case .llm: return "brain"
-            case .stt: return "mic.fill"
-            case .tts: return "speaker.wave.3.fill"
-            }
-        }
+    /// Whisper Medium CoreML — higher accuracy option.
+    static let whisperMediumThai = ModelEntry(
+        id: "whisper-medium-th",
+        displayName: "Whisper Medium (Thai / Multilingual)",
+        description: "Higher accuracy multilingual ASR. Recommended for Thai in noisy environments.",
+        sizeBytes: 780 * 1_048_576,
+        huggingFaceRepo: "argmaxinc/whisperkit-coreml",
+        filename: "openai_whisper-medium",
+        isDirectory: true,
+        requiredFor: [.thai]
+    )
+}
 
-        var sizeDescription: String {
-            switch self {
-            case .llm: return "~1.26 GB"
-            case .stt: return "~450 MB"
-            case .tts: return "~600 MB"
-            }
-        }
+// MARK: - ModelRegistry Extension
 
-        var detail: String {
-            switch self {
-            case .llm: return "Qwen3.5-2B Q4_K_S"
-            case .stt: return "Parakeet EOU 320"
-            case .tts: return "PocketTTS"
-            }
-        }
+extension ModelRegistry {
+
+    /// All Thai-configuration model entries.
+    static var thaiEntries: [ModelEntry] {
+        [.whisperSmallThai, .whisperMediumThai]
     }
 
-    // MARK: - LLM
+    /// Returns the correct model entries for a given ModelConfiguration.
+    static func entries(for config: ModelConfiguration) -> [ModelEntry] {
+        var entries: [ModelEntry] = []
 
-    static let llmFilename = "Qwen_Qwen3.5-2B-Q4_K_S.gguf"
+        // STT
+        switch config.asrBackend {
+        case .parakeet:
+            entries.append(.parakeetEou)           // existing entry
+        case .whisperSmall:
+            entries.append(.whisperSmallThai)
+        case .whisperMedium:
+            entries.append(.whisperMediumThai)
+        }
 
-    static let llmBaseURL = "https://huggingface.co/bartowski/Qwen_Qwen3.5-2B-GGUF/resolve/main"
+        // LLM
+        switch config.llmBackend {
+        case .qwen2B:
+            entries.append(.qwen2B)                // existing entry
+        case .qwen0_8B:
+            entries.append(.qwen0_8B)              // new lite entry
+        case .appleFoundation:
+            break   // no download needed
+        }
 
-    static var llmDownloadURL: String {
-        "\(llmBaseURL)/\(llmFilename)"
+        // TTS (always PocketTTS)
+        entries.append(.pocketTTS)                 // existing entry
+
+        return entries
     }
+}
 
-    // MARK: - Paths
+// MARK: - Qwen 0.8B Entry
 
-    static var modelsDirectory: URL {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let dir = docs.appendingPathComponent("models", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    static var llmModelPath: String? {
-        let path = modelsDirectory.appendingPathComponent(llmFilename).path
-        guard FileManager.default.fileExists(atPath: path),
-              let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let size = attrs[.size] as? UInt64,
-              size > 1024 else { return nil }
-        return path
-    }
+extension ModelEntry {
+    static let qwen0_8B = ModelEntry(
+        id: "qwen3.5-0.8b-q4ks",
+        displayName: "Qwen3.5-0.8B (Lite LLM, 520 MB)",
+        description: "Smaller, faster language model. Recommended when memory is limited or Thai ASR is active.",
+        sizeBytes: 520 * 1_048_576,
+        huggingFaceRepo: "bartowski/Qwen_Qwen3.5-0.8B-GGUF",
+        filename: "Qwen3.5-0.8B-Q4_K_S.gguf",
+        isDirectory: false,
+        requiredFor: [.english, .thai]
+    )
 }
