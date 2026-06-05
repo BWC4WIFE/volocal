@@ -338,29 +338,7 @@ public final class VoicePipeline: ObservableObject {
 
 // MARK: - SentenceBuffer
 
-/// Accumulates streaming LLM tokens and emits complete sentences for TTS.
-private final class SentenceBuffer {
-    private var buffer = ""
-    private let terminators: Set<Character> = [".", "!", "?", ":", ";"]
-    private let maxLength = 200
-
-    func append(_ token: String) -> String? {
-        buffer += token
-        if let idx = buffer.lastIndex(where: { terminators.contains($0) }),
-           buffer.count > 10
-        {
-            let sentence = String(buffer[...idx]).trimmingCharacters(in: .whitespaces)
-            buffer = String(buffer[buffer.index(after: idx)...])
-            return sentence.isEmpty ? nil : sentence
-        }
-        if buffer.count > maxLength {
-            let sentence = buffer.trimmingCharacters(in: .whitespaces)
-            buffer = ""
-            return sentence.isEmpty ? nil : sentence
-        }
-        return nil
-    }
-
+/// Accumulates streaming LLM tokens and emits complete sentences for TTS
     func flush() -> String? {
         let sentence = buffer.trimmingCharacters(in: .whitespaces)
         buffer = ""
