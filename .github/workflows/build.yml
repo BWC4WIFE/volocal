@@ -2,6 +2,7 @@
 name: iOS Build
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
@@ -44,7 +45,7 @@ jobs:
           xcodebuild \
             -scheme Volocal \
             -configuration Debug \
-            -destination "platform=iOS Simulator,name=iPhone 15" \
+            -destination "platform=iOS Simulator,name=iPhone 17" \
             clean build
         env:
           PROJECT_DIR: ${{ github.workspace }}
