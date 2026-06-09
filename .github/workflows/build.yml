@@ -1,8 +1,3 @@
-# .github/workflows/build.yml
-# Builds an unsigned IPA artifact on every push/PR to main.
-# No code signing, no provisioning profile — signing happens on-device
-# with a development certificate via sideloading tools (AltStore, SideStore).
-# Errors are rendered through xcbeautify for GitHub Actions annotation support.
 name: Build Volocal IPA
 
 on:
@@ -98,7 +93,7 @@ jobs:
           echo "Configuration: ${{ env.CONFIGURATION }}"
           echo "SDK: ${{ env.SDK }}"
 
-      # ── Build & Archive ─────────────────────────────────────────────
+      # ─��� Build & Archive ─────────────────────────────────────────────
 
       - name: Resolve package dependencies
         run: |
