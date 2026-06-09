@@ -69,6 +69,14 @@ jobs:
       - name: Install xcbeautify
         run: brew install xcbeautify
 
+      - name: Resolve SPM dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -sdk "$SDK"
+
       # ── Build (unsigned) ────────────────────────────────────────────
 
       - name: Build unsigned app
