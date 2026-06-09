@@ -11,6 +11,9 @@ settings:
     SWIFT_VERSION: "5.9"
     ENABLE_USER_SCRIPT_SANDBOXING: false
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+    SKIP_INSTALL: NO
+    COPY_PHASE_STRIP: NO
+    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: YES
 
 packages:
   llama-swift:
@@ -38,6 +41,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FBS8R927D4
         TARGETED_DEVICE_FAMILY: 1
+        LD_RUNPATH_SEARCH_PATHS: $(inherited) @executable_path/Frameworks @loader_path/Frameworks
     dependencies:
       - package: llama-swift
         product: LlamaSwift
@@ -61,4 +65,3 @@ targets:
       path: Volocal/Volocal.entitlements
       properties:
         com.apple.security.device.audio-input: true
-
