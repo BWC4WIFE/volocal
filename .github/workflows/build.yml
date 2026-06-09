@@ -25,8 +25,6 @@ env:
   CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.configuration || 'release' }}
   SDK: iphoneos
   DERIVED_DATA: ${{ github.workspace }}/DerivedData
-  ARCHIVE_PATH: /tmp/Volocal.xcarchive
-  IPA_EXPORT_PATH: /tmp/Volocal.ipa
 
 jobs:
   build:
@@ -39,20 +37,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: true
-          fetch-depth: 0
-
-      # ── Install XcodeGen to regenerate project ────────────────────
-
-      - name: Install XcodeGen
-        run: |
-          brew install xcodegen
-          xcodegen --version
-
-      - name: Regenerate Xcode project from project.yml
-        run: |
-          echo "Regenerating project.pbxproj from project.yml..."
-          xcodegen generate
-          echo "Project regenerated successfully"
 
       # ── Caching ──────────────────────────────────────────────────────
 
@@ -70,7 +54,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/Package.resolved', '**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
           restore-keys: |
             ${{ runner.os }}-deriveddata-
 
@@ -78,152 +62,35 @@ jobs:
 
       - name: Select Xcode
         run: |
-          ls /Applications/ | grep Xcode || echo "No Xcode apps found"
+          ls /Applications/ | grep Xcode
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
 
       - name: Install xcbeautify
         run: brew install xcbeautify
 
-      - name: Print environment
-        run: |
-          echo "Xcode: $(xcodebuild -version 2>&1 | head -1)"
-          echo "Swift: $(swift --version 2>&1 | head -1)"
-          echo "macOS: $(sw_vers -productVersion)"
-          echo "Configuration: ${{ env.CONFIGURATION }}"
-          echo "SDK: ${{ env.SDK }}"
+      # ── Build (unsigned) ────────────────────────────────────────────
 
-      # ─��� Build & Archive ─────────────────────────────────────────────
-
-      - name: Resolve package dependencies
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -project Volocal.xcodeproj \
-            -clonedSourcePackagesDirPath /tmp/Volocal-packages \
-            -skipPackageUpdates 2>&1 | xcbeautify --renderer github-actions
-
-      - name: Validate project structure
-        run: |
-          echo "Validating project files..."
-          [ -f "Volocal.xcodeproj/project.pbxproj" ] || { echo "::error::Missing Volocal.xcodeproj/project.pbxproj"; exit 1; }
-          [ -f "project.yml" ] || { echo "::warning::No project.yml found"; }
-          [ -d "Volocal" ] || { echo "::error::Missing Volocal source directory"; exit 1; }
-          echo "Project structure validated"
-
-      - name: Clean derived data
-        run: |
-          echo "Cleaning derived data..."
-          rm -rf "$DERIVED_DATA" || true
-          echo "Derived data cleaned"
-
-      - name: Build and archive (unsigned)
+      - name: Build unsigned app
         run: |
           set -o pipefail
-          xcodebuild archive \
-            -project Volocal.xcodeproj \
+          xcodebuild build \
             -scheme "$SCHEME" \
-            -sdk "$SDK" \
             -configuration "$CONFIGURATION" \
             -derivedDataPath "$DERIVED_DATA" \
-            -archivePath "$ARCHIVE_PATH" \
+            -sdk "$SDK" \
             -destination "generic/platform=iOS" \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM="" \
             2>&1 | xcbeautify --renderer github-actions
 
-      - name: Verify archive
-        if: success()
-        run: |
-          if [ ! -d "$ARCHIVE_PATH" ]; then
-            echo "::error::Archive not found at $ARCHIVE_PATH"
-            exit 1
-          fi
-          echo "Archive size: $(du -sh "$ARCHIVE_PATH" | cut -f1)"
-          
-          # Verify app bundle exists
-          APP_BUNDLE="$ARCHIVE_PATH/Products/Applications/Volocal.app"
-          if [ ! -d "$APP_BUNDLE" ]; then
-            echo "::error::App bundle not found at $APP_BUNDLE"
-            ls -la "$ARCHIVE_PATH/Products/" 2>/dev/null || echo "Products directory listing failed"
-            exit 1
-          fi
-          echo "App bundle verified at $APP_BUNDLE"
-
-      # ── Export IPA (unsigned) ───────────────────────────────────────
-
-      - name: Export unsigned IPA
-        if: success()
-        run: |
-          set -o pipefail
-
-          # Create minimal exportOptions.plist for unsigned export
-          cat > /tmp/exportOptions.plist << 'PLISTEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>development</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>signingCertificate</key>
-              <string>-</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.fikrikarim.volocal</key>
-                  <string></string>
-              </dict>
-              <key>compileBitcode</key>
-              <false/>
-              <key>uploadSymbols</key>
-              <false/>
-              <key>teamID</key>
-              <string></string>
-              <key>generateAssetPackManifestBundles</key>
-              <false/>
-          </dict>
-          </plist>
-          PLISTEOF
-
-          mkdir -p /tmp/ipa-output
-          xcodebuild -exportArchive \
-            -archivePath "$ARCHIVE_PATH" \
-            -exportPath /tmp/ipa-output \
-            -exportOptionsPlist /tmp/exportOptions.plist \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | xcbeautify --renderer github-actions
-
-      - name: Rename IPA
-        if: success()
-        run: |
-          IPA_FILE=$(find /tmp/ipa-output -name "*.ipa" | head -1)
-          if [ -z "$IPA_FILE" ]; then
-            echo "::error::No IPA found in /tmp/ipa-output"
-            ls -la /tmp/ipa-output/
-            exit 1
-          fi
-          cp "$IPA_FILE" "$IPA_EXPORT_PATH"
-          echo "IPA: $IPA_EXPORT_PATH"
-          echo "Size: $(du -sh "$IPA_EXPORT_PATH" | cut -f1)"
-          
-          # Verify IPA integrity
-          if ! unzip -t "$IPA_EXPORT_PATH" > /dev/null 2>&1; then
-            echo "::error::IPA file is corrupted or invalid"
-            exit 1
-          fi
-          echo "IPA file integrity verified"
-
-      # ── Unit Tests (Simulator) ──────────────────────────────────────
+      # ── Unit Tests (Simulator) ───────────────────────────────────────
 
       - name: Run unit tests
-        if: success()
         continue-on-error: true
         run: |
           set -o pipefail
@@ -248,51 +115,54 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | xcbeautify --renderer github-actions || true
 
+      # ── Package Unsigned IPA ────────────────────────────────────────
+
+      - name: Create unsigned IPA
+        if: success()
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos" \
+            -name "*.app" -maxdepth 1 -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No .app bundle found in DerivedData build products"
+            ls -la "$DERIVED_DATA/Build/Products/" 2>/dev/null || echo "Build products directory not found"
+            exit 1
+          fi
+          APP_NAME=$(basename "$APP_PATH" .app)
+          echo "Found app bundle: $APP_PATH ($APP_NAME)"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qr "${APP_NAME}.ipa" Payload/
+          echo "ipa_name=${APP_NAME}" >> "$GITHUB_ENV"
+          echo "Created ${APP_NAME}.ipa ($(du -sh "${APP_NAME}.ipa" | cut -f1))"
+
       # ── Upload Artifact ─────────────────────────────────────────────
 
-      - name: Upload IPA artifact
+      - name: Upload unsigned IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Volocal-${{ env.CONFIGURATION }}-${{ github.sha }}
-          path: ${{ env.IPA_EXPORT_PATH }}
+          path: ${{ env.ipa_name }}.ipa
           if-no-files-found: error
           retention-days: 30
-          compression-level: 0
-
-      - name: Upload dSYM symbols
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Volocal-dSYM-${{ env.CONFIGURATION }}-${{ github.sha }}
-          path: |
-            ${{ env.ARCHIVE_PATH }}/dSYMs/**/*.dSYM
-            ${{ env.ARCHIVE_PATH }}/BCSymbolMaps/**/*
-          if-no-files-found: warn
-          retention-days: 7
-          compression-level: 6
 
       # ── Build Summary ───────────────────────────────────────────────
 
       - name: Build summary
         if: always()
         run: |
-          {
-            echo "## Volocal Build Results"
-            echo ""
-            echo "| Item | Value |"
-            echo "|------|-------|"
-            echo "| Branch | ${{ github.ref_name }} |"
-            echo "| Commit | ${{ github.sha }} |"
-            echo "| Scheme | $SCHEME |"
-            echo "| Configuration | $CONFIGURATION |"
-            echo "| Code Signed | No (unsigned — signed on device) |"
-            echo "| Runner | ${{ runner.os }} (${{ runner.arch }}) |"
-            if [ -f "$IPA_EXPORT_PATH" ]; then
-              IPA_SIZE=$(du -sh "$IPA_EXPORT_PATH" | cut -f1)
-              echo "| IPA Size | $IPA_SIZE |"
-              echo "| IPA | ✅ Uploaded |"
-            else
-              echo "| IPA | ❌ Not created |"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "## Volocal Build Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Scheme | $SCHEME |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Configuration | $CONFIGURATION |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Code Signed | No (unsigned) |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "${ipa_name:-Volocal}.ipa" ]; then
+            echo "| IPA Size | $(du -sh "${ipa_name:-Volocal}.ipa" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| IPA | ✅ Uploaded |" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| IPA | ❌ Not created |" >> "$GITHUB_STEP_SUMMARY"
+          fi
