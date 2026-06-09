@@ -102,11 +102,14 @@ jobs:
           [ -d "Volocal" ] || { echo "::error::Missing Volocal source directory"; exit 1; }
           echo "Project structure validated"
 
-      - name: Clean build artifacts
+      - name: Clean build artifacts strategically
         run: |
           echo "Cleaning build artifacts..."
-          rm -rf "$DERIVED_DATA/Build"
-          echo "Build artifacts cleaned (cache preserved)"
+          # Remove only intermediate build files, not the entire cache
+          rm -rf "$DERIVED_DATA/Build/Intermediates.noindex" 2>/dev/null || true
+          rm -rf "$DERIVED_DATA/Build/Products" 2>/dev/null || true
+          rm -rf "$DERIVED_DATA/Index" 2>/dev/null || true
+          echo "Build artifacts cleaned (module cache preserved)"
 
       - name: Build and archive (unsigned)
         run: |
@@ -125,7 +128,26 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM="" \
+            OTHER_LDFLAGS="-lc++" \
             2>&1 | xcbeautify --renderer github-actions
+
+      - name: Debug: Inspect archive contents
+        run: |
+          echo "=== Archive Structure ==="
+          echo "Archive exists: $([ -d "$ARCHIVE_PATH" ] && echo "YES" || echo "NO")"
+          if [ -d "$ARCHIVE_PATH" ]; then
+            du -sh "$ARCHIVE_PATH"
+            echo ""
+            echo "=== Products Directory ==="
+            ls -la "$ARCHIVE_PATH/Products/" 2>/dev/null || echo "No Products directory"
+            echo ""
+            echo "=== App Bundle Contents ==="
+            if [ -d "$ARCHIVE_PATH/Products/Applications/Volocal.app" ]; then
+              ls -la "$ARCHIVE_PATH/Products/Applications/Volocal.app/Frameworks/" 2>/dev/null | head -20 || echo "No Frameworks directory"
+              echo ""
+              find "$ARCHIVE_PATH/Products/Applications/Volocal.app" -name "*.bundle" -type d 2>/dev/null | head -10
+            fi
+          fi
 
       - name: Verify archive
         if: success()
@@ -192,6 +214,14 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | xcbeautify --renderer github-actions
+
+      - name: Verify IPA export
+        run: |
+          echo "=== IPA Output Directory ==="
+          ls -lh /tmp/ipa-output/ || echo "IPA output directory not found"
+          echo ""
+          echo "=== Looking for IPA files ==="
+          find /tmp/ipa-output -name "*.ipa" -type f 2>/dev/null
 
       - name: Rename IPA
         if: success()
