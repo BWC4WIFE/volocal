@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/Package.resolved', '**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
           restore-keys: |
             ${{ runner.os }}-deriveddata-
 
