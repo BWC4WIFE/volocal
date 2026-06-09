@@ -2,7 +2,7 @@ name: Volocal
 options:
   bundleIdPrefix: com.fikrikarim
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "18.0"
   xcodeVersion: "16.0"
   generateEmptyDirectories: true
 
@@ -61,3 +61,4 @@ targets:
       path: Volocal/Volocal.entitlements
       properties:
         com.apple.security.device.audio-input: true
+

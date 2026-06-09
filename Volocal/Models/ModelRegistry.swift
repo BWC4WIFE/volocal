@@ -27,10 +27,10 @@ enum ModelRegistry {
             }
         }
 
-        var sizeDescription: String {
+                var sizeDescription: String {
             switch self {
             case .llm: return "~1.26 GB"
-            case .stt: return "~450 MB"
+            case .stt: return "~1.75 GB"
             case .tts: return "~600 MB"
             }
         }
@@ -38,7 +38,7 @@ enum ModelRegistry {
         var detail: String {
             switch self {
             case .llm: return "Qwen3.5-2B Q4_K_S"
-            case .stt: return "Parakeet EOU 320"
+            case .stt: return "Qwen3-ASR 0.6B f32"
             case .tts: return "PocketTTS"
             }
         }

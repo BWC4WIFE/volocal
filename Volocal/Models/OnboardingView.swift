@@ -38,8 +38,8 @@ struct OnboardingView: View {
                 }
                 .padding(.horizontal)
 
-                // Wi-Fi recommendation
-                Text("Recommended: download over Wi-Fi (~2.3 GB total)")
+                                // Wi-Fi recommendation
+                Text("Recommended: download over Wi-Fi (~3.6 GB total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

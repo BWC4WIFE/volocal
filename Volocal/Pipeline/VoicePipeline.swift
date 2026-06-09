@@ -69,10 +69,10 @@ final class VoicePipeline: ObservableObject {
         sttManager.sharedAudio = sharedAudio
         ttsManager.sharedAudio = sharedAudio
 
-        loadingStatus = "Loading speech recognition..."
-        metrics?.beginTracking("STT (Parakeet EOU)")
+                loadingStatus = "Loading speech recognition..."
+        metrics?.beginTracking("STT (Qwen3-ASR)")
         await sttManager.initialize()
-        metrics?.endTracking("STT (Parakeet EOU)")
+        metrics?.endTracking("STT (Qwen3-ASR)")
 
         loadingStatus = "Loading language model..."
         if let path = llmModelPath {

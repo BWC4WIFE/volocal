@@ -49,10 +49,9 @@ final class UnifiedModelManager: ObservableObject {
             modelStates[.llm] = .notDownloaded
         }
 
-        // STT: check if Parakeet EOU models exist
-        let sttDir = ModelRegistry.modelsDirectory.appendingPathComponent(Repo.parakeetEou320.folderName)
-        let encoderPath = sttDir.appendingPathComponent("streaming_encoder.mlmodelc")
-        if FileManager.default.fileExists(atPath: encoderPath.path) {
+                // STT: check if Qwen3-ASR f32 models exist in default cache
+                let sttDir = Qwen3AsrModels.defaultCacheDirectory(variant: .f32)
+                if Qwen3AsrModels.modelsExist(at: sttDir) {
             modelStates[.stt] = .downloaded
         } else {
             modelStates[.stt] = .notDownloaded
@@ -183,13 +182,15 @@ final class UnifiedModelManager: ObservableObject {
         }
     }
 
-    // MARK: - STT Download (FluidAudio with progress)
+        // MARK: - STT Download (FluidAudio Qwen3-ASR with progress)
 
     private func downloadSTT() async {
         modelStates[.stt] = .downloading(progress: 0)
 
         do {
-            try await DownloadUtils.downloadRepo(.parakeetEou320, to: ModelRegistry.modelsDirectory) { [weak self] progress in
+                        try await Qwen3AsrModels.download(
+                variant: .f32
+            ) { [weak self] progress in
                 Task { @MainActor in
                     self?.modelStates[.stt] = .downloading(progress: progress.fractionCompleted)
                 }
