@@ -60,7 +60,6 @@ jobs:
 
       - name: Cache DerivedData
         uses: actions/cache@v4
-        id: cache-derived-data
         with:
           path: ${{ env.DERIVED_DATA }}
           key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/Package.resolved', '**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
@@ -85,7 +84,6 @@ jobs:
           echo "macOS: $(sw_vers -productVersion)"
           echo "Configuration: ${{ env.CONFIGURATION }}"
           echo "SDK: ${{ env.SDK }}"
-          echo "Deployment Target: $(grep -A 1 'deploymentTarget:' project.yml | grep 'iOS' | awk '{print $2}' || echo 'Not specified')"
 
       # ── Build & Archive ─────────────────────────────────────────────
 
@@ -121,7 +119,6 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
-            IPHONEOS_DEPLOYMENT_TARGET="18.0" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -253,8 +250,7 @@ jobs:
           compression-level: 0
 
       - name: Upload dSYM symbols
-        if: failure() == false
-        continue-on-error: true
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Volocal-dSYM-${{ env.CONFIGURATION }}-${{ github.sha }}
