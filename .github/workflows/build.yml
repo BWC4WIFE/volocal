@@ -94,12 +94,6 @@ jobs:
             -clonedSourcePackagesDirPath /tmp/Volocal-packages \
             -skipPackageUpdates 2>&1 | xcbeautify --renderer github-actions
 
-      - name: Clear DerivedData before archive
-        run: |
-          echo "Clearing stale DerivedData to prevent bundle resolution issues..."
-          rm -rf "$DERIVED_DATA"
-          echo "DerivedData cleared successfully"
-
       - name: Validate project structure
         run: |
           echo "Validating project files..."
@@ -108,10 +102,16 @@ jobs:
           [ -d "Volocal" ] || { echo "::error::Missing Volocal source directory"; exit 1; }
           echo "Project structure validated"
 
+      - name: Clean build artifacts
+        run: |
+          echo "Cleaning build artifacts..."
+          rm -rf "$DERIVED_DATA/Build"
+          echo "Build artifacts cleaned (cache preserved)"
+
       - name: Build and archive (unsigned)
         run: |
           set -o pipefail
-          xcodebuild clean archive \
+          xcodebuild archive \
             -project Volocal.xcodeproj \
             -scheme "$SCHEME" \
             -sdk "$SDK" \
@@ -128,6 +128,7 @@ jobs:
             2>&1 | xcbeautify --renderer github-actions
 
       - name: Verify archive
+        if: success()
         run: |
           if [ ! -d "$ARCHIVE_PATH" ]; then
             echo "::error::Archive not found at $ARCHIVE_PATH"
@@ -148,6 +149,7 @@ jobs:
       # ── Export IPA (unsigned) ───────────────────────────────────────
 
       - name: Export unsigned IPA
+        if: success()
         run: |
           set -o pipefail
 
@@ -192,6 +194,7 @@ jobs:
             2>&1 | xcbeautify --renderer github-actions
 
       - name: Rename IPA
+        if: success()
         run: |
           IPA_FILE=$(find /tmp/ipa-output -name "*.ipa" | head -1)
           if [ -z "$IPA_FILE" ]; then
@@ -213,6 +216,7 @@ jobs:
       # ── Unit Tests (Simulator) ──────────────────────────────────────
 
       - name: Run unit tests
+        if: success()
         continue-on-error: true
         run: |
           set -o pipefail
@@ -240,7 +244,7 @@ jobs:
       # ── Upload Artifact ─────────────────────────────────────────────
 
       - name: Upload IPA artifact
-        if: always()
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Volocal-${{ env.CONFIGURATION }}-${{ github.sha }}
