@@ -60,6 +60,7 @@ jobs:
 
       - name: Cache DerivedData
         uses: actions/cache@v4
+        id: cache-derived-data
         with:
           path: ${{ env.DERIVED_DATA }}
           key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/Package.resolved', '**/*.swift', '**/*.xcodeproj/**', '**/project.yml') }}
@@ -84,6 +85,7 @@ jobs:
           echo "macOS: $(sw_vers -productVersion)"
           echo "Configuration: ${{ env.CONFIGURATION }}"
           echo "SDK: ${{ env.SDK }}"
+          echo "Deployment Target: $(grep -A 1 'deploymentTarget:' project.yml | grep 'iOS' | awk '{print $2}' || echo 'Not specified')"
 
       # ── Build & Archive ─────────────────────────────────────────────
 
@@ -93,6 +95,20 @@ jobs:
             -project Volocal.xcodeproj \
             -clonedSourcePackagesDirPath /tmp/Volocal-packages \
             -skipPackageUpdates 2>&1 | xcbeautify --renderer github-actions
+
+      - name: Clear DerivedData before archive
+        run: |
+          echo "Clearing stale DerivedData to prevent bundle resolution issues..."
+          rm -rf "$DERIVED_DATA"
+          echo "DerivedData cleared successfully"
+
+      - name: Validate project structure
+        run: |
+          echo "Validating project files..."
+          [ -f "Volocal.xcodeproj/project.pbxproj" ] || { echo "::error::Missing Volocal.xcodeproj/project.pbxproj"; exit 1; }
+          [ -f "project.yml" ] || { echo "::warning::No project.yml found"; }
+          [ -d "Volocal" ] || { echo "::error::Missing Volocal source directory"; exit 1; }
+          echo "Project structure validated"
 
       - name: Build and archive (unsigned)
         run: |
@@ -105,6 +121,7 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -archivePath "$ARCHIVE_PATH" \
             -destination "generic/platform=iOS" \
+            IPHONEOS_DEPLOYMENT_TARGET="18.0" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -120,7 +137,16 @@ jobs:
             exit 1
           fi
           echo "Archive size: $(du -sh "$ARCHIVE_PATH" | cut -f1)"
-          echo "Products: $(ls "$ARCHIVE_PATH/Products/" 2>/dev/null)"
+          echo "Products: $(ls "$ARCHIVE_PATH/Products/" 2>/dev/null || echo 'None found')"
+          
+          # Verify app bundle exists
+          APP_BUNDLE="$ARCHIVE_PATH/Products/Applications/Volocal.app"
+          if [ ! -d "$APP_BUNDLE" ]; then
+            echo "::error::App bundle not found at $APP_BUNDLE"
+            ls -la "$ARCHIVE_PATH/Products/" 2>/dev/null || echo "Products directory listing failed"
+            exit 1
+          fi
+          echo "App bundle verified at $APP_BUNDLE"
 
       # ── Export IPA (unsigned) ───────────────────────────────────────
 
@@ -158,6 +184,7 @@ jobs:
           </plist>
           PLISTEOF
 
+          mkdir -p /tmp/ipa-output
           xcodebuild -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportPath /tmp/ipa-output \
@@ -178,6 +205,13 @@ jobs:
           cp "$IPA_FILE" "$IPA_EXPORT_PATH"
           echo "IPA: $IPA_EXPORT_PATH"
           echo "Size: $(du -sh "$IPA_EXPORT_PATH" | cut -f1)"
+          
+          # Verify IPA integrity
+          if ! unzip -t "$IPA_EXPORT_PATH" > /dev/null 2>&1; then
+            echo "::error::IPA file is corrupted or invalid"
+            exit 1
+          fi
+          echo "IPA file integrity verified"
 
       # ── Unit Tests (Simulator) ──────────────────────────────────────
 
@@ -209,6 +243,7 @@ jobs:
       # ── Upload Artifact ─────────────────────────────────────────────
 
       - name: Upload IPA artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Volocal-${{ env.CONFIGURATION }}-${{ github.sha }}
@@ -218,7 +253,8 @@ jobs:
           compression-level: 0
 
       - name: Upload dSYM symbols
-        if: success()
+        if: failure() == false
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Volocal-dSYM-${{ env.CONFIGURATION }}-${{ github.sha }}
