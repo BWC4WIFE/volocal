@@ -210,7 +210,7 @@ final class UnifiedModelManager: ObservableObject {
         modelStates[.tts] = .downloading(progress: 0)
 
         do {
-            _ = try await PocketTtsResourceDownloader.ensureModels(language: "en") { [weak self] progress in
+            _ = try await PocketTtsResourceDownloader.ensureModels(language: .english) { [weak self] progress in
                 Task { @MainActor in
                     self?.modelStates[.tts] = .downloading(progress: progress.fractionCompleted)
                 }
