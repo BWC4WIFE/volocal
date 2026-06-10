@@ -81,6 +81,48 @@ final class UnifiedModelManager: ObservableObject {
         return FileManager.default.fileExists(atPath: condStepPath.path)
     }
 
+    // MARK: - Import
+
+    func importModels(from folderURL: URL) async {
+        guard folderURL.startAccessingSecurityScopedResource() else {
+            self.error = "Permission denied to access folder."
+            return
+        }
+        
+        // Stop accessing the resource when the function exits
+        defer { folderURL.stopAccessingSecurityScopedResource() }
+
+        let fm = FileManager.default
+
+        do {
+            // 1. Import LLM
+            let llmSource = folderURL.appendingPathComponent(ModelRegistry.llmFilename)
+            if fm.fileExists(atPath: llmSource.path) {
+                let llmDest = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
+                if fm.fileExists(atPath: llmDest.path) {
+                    try fm.removeItem(at: llmDest)
+                }
+                try fm.copyItem(at: llmSource, to: llmDest)
+            }
+
+            // 2. Import FluidAudio caches (STT and TTS)
+            let fluidSource = folderURL.appendingPathComponent("fluidaudio")
+            if fm.fileExists(atPath: fluidSource.path) {
+                if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                    let fluidDest = cachesDir.appendingPathComponent("fluidaudio")
+                    if fm.fileExists(atPath: fluidDest.path) {
+                        try fm.removeItem(at: fluidDest)
+                    }
+                    try fm.copyItem(at: fluidSource, to: fluidDest)
+                }
+            }
+
+            checkExistingModels()
+        } catch {
+            self.error = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Download
 
     func downloadAllModels() async {
