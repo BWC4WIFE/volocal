@@ -9,10 +9,11 @@ private let logger = Logger(subsystem: "com.volocal.app", category: "stt")
 /// optimized for Thai language on Apple Neural Engine.
 ///
 /// Qwen3-ASR is an encoder-decoder model running as CoreML.
-/// Audio buffers are accumulated into chunks; FluidAudio VadManager (Silero VAD
-/// CoreML) detects end-of-utterance via streaming chunk processing with 0.5s
-/// minimum silence duration for faster utterance detection in noise.
-/// Emits partial transcription results every ~2s during active speech.
+/// Audio buffers are accumulated into chunks; VAD-based silence detection triggers
+/// full transcription via Qwen3ASRManager.transcribe(audioSamples:language:).
+/// Uses VadManager (Silero VAD CoreML) if available, falls back to energy-based
+/// RMS threshold detection. Silence threshold reduced to ~0.5s for faster
+/// utterance boundary detection. Emits partial results every ~2s.
 ///
 /// Uses SharedAudioEngine for mic input instead of creating its own AVAudioEngine.
 @available(iOS 18.0, *)
@@ -42,34 +43,45 @@ final class STTManager: ObservableObject {
     private let modelVariant: Qwen3AsrVariant = .f32
 
         private var asrManager: Qwen3AsrManager?
-    private var vadManager: VadManager?
-    private var vadStreamState: VadStreamState?
-    private var hasFiredSpeechDetected = false
-    private var isStopping = false
+        private var vadManager: VadManager?
+        private var vadStreamState: VadStreamState?
+        private var hasFiredSpeechDetected = false
+        private var isStopping = false
 
-    /// Accumulates audio samples for the current utterance (16kHz mono Float32).
-    private var audioBuffer: [Float] = []
+        /// Accumulates audio samples for the current utterance (16kHz mono Float32).
+        private var audioBuffer: [Float] = []
 
-    /// Minimum audio duration before transcription (1.0s at 16kHz).
-    private let minAudioSamples = 16_000
+        /// Minimum audio duration before transcription (1.0s at 16kHz).
+        private let minAudioSamples = 16_000
 
-    /// Maximum audio duration before forced transcription (30s at 16kHz).
-    private let maxAudioSamples = 480_000
+        /// Maximum audio duration before forced transcription (30s at 16kHz).
+        private let maxAudioSamples = 480_000
 
-    /// Partial result interval in samples. Emits interim transcription every ~2s at 16kHz.
-    private let partialResultIntervalSamples = 32_000
+        /// Partial result interval in samples. Emits interim transcription every ~2s at 16kHz.
+        private let partialResultIntervalSamples = 32_000
 
-    /// Last sample count at which we emitted a partial result.
-    private var lastPartialSampleCount: Int = 0
+        /// Last sample count at which we emitted a partial result.
+        private var lastPartialSampleCount: Int = 0
 
-    /// VAD buffer accumulates 16kHz mono samples until we have a full chunk (4096).
-    private var vadBuffer: [Float] = []
+        /// VAD buffer accumulates 16kHz mono samples until we have a full chunk (4096).
+        private var vadBuffer: [Float] = []
 
-    /// Serial stream for backpressure — prevents unbounded Task spawning per audio buffer.
-    private var bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
-    private var processingTask: Task<Void, Never>?
+        /// Tracks whether VAD has detected sustained silence since last utterance.
+        private var didSpeechEnd: Bool = false
 
-    init() {}
+        /// Energy-based VAD fallback state (used when VadManager is unavailable).
+        private let silenceEnergyThreshold: Float = 0.01
+        private var consecutiveSilenceChunks: Int = 0
+        /// Minimum consecutive silent chunks to trigger end-of-utterance.
+        /// Each chunk is VadManager.chunkSize (4096) samples = 256ms at 16kHz.
+        /// 2 chunks = ~0.5s.
+        private let silenceChunksThreshold = 2
+
+        /// Serial stream for backpressure — prevents unbounded Task spawning per audio buffer.
+        private var bufferContinuation: AsyncStream<AVAudioPCMBuffer>.Continuation?
+        private var processingTask: Task<Void, Never>?
+
+        init() {}
 
             /// Download Qwen3-ASR CoreML models from HuggingFace and load into memory.
             /// Also initializes FluidAudio's VadManager for accurate voice activity detection.
@@ -94,17 +106,25 @@ final class STTManager: ObservableObject {
                     self.asrManager = manager
                     logger.info("Qwen3-ASR (\(self.modelVariant.rawValue)) ready")
 
-                    // Initialize FluidAudio's VadManager (Silero VAD CoreML)
-                    logger.info("Initializing VadManager (Silero VAD)...")
-                    let vad = try await VadManager(
-                        config: VadConfig(
-                            defaultThreshold: 0.5,
-                            computeUnits: .all
+                    // Initialize FluidAudio's VadManager (Silero VAD CoreML) if available.
+                    // Failure is non-fatal: falls back to energy-based silence detection.
+                    do {
+                        logger.info("Attempting VadManager init (Silero VAD)...")
+                        let vad = try await VadManager(
+                            config: VadConfig(
+                                defaultThreshold: 0.5,
+                                computeUnits: .all
+                            )
                         )
-                    )
-                    self.vadManager = vad
-                    logger.info("VadManager ready")
-                } catch {
+                        self.vadManager = vad
+                        logger.info("VadManager ready")
+                    } catch {
+                        logger.warning(
+                            "VadManager init failed, using energy-based VAD: "
+                                + "\(error.localizedDescription)"
+                        )
+                    }
+        } catch {
                     self.error = "STT init failed: \(error.localizedDescription)"
                     logger.error("STT init failed: \(error.localizedDescription)")
                 }
@@ -157,9 +177,6 @@ final class STTManager: ObservableObject {
         error = nil
         logger.info("STT listening started (lang=\(self.language ?? "auto"))")
     }
-
-        /// Tracks whether VAD has emitted a speechEnd event since last utterance.
-    private var didSpeechEnd: Bool = false
 
     /// Process an audio buffer from the mic tap.
     /// Converts to 16kHz mono Float32, runs VAD for speech detection,
@@ -283,18 +300,14 @@ final class STTManager: ObservableObject {
         }
     }
 
-    /// Fallback VAD using simple energy-based detection when VadManager is unavailable.
-    private let silenceEnergyThreshold: Float = 0.01
-    private var consecutiveSilenceChunks: Int = 0
-    private let silenceFallbackChunks = 2  // ~0.5s at 256ms per chunk
-
+        /// Fallback VAD using simple energy-based detection when VadManager is unavailable.
     private func fallbackVadChunk(_ chunk: [Float]) {
         let energy = calculateRMS(chunk)
         let isSilence = energy < silenceEnergyThreshold
 
-        if isSilence {
+                if isSilence {
             consecutiveSilenceChunks += 1
-            if consecutiveSilenceChunks >= silenceFallbackChunks
+            if consecutiveSilenceChunks >= silenceChunksThreshold
                 && hasFiredSpeechDetected {
                 didSpeechEnd = true
             }
