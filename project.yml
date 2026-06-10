@@ -20,8 +20,8 @@ packages:
     url: https://github.com/mattt/llama.swift.git
     from: "2.0.0"
   FluidAudio:
-    url: https://github.com/fikrikarim/FluidAudio.git
-    branch: main
+    url: https://github.com/FluidInference/FluidAudio.git
+    from: "0.12.4"
 
 targets:
   Volocal:
