@@ -1,4 +1,4 @@
-name: Build Volocal IPA
+﻿name: Build Volocal IPA
 
 on:
   workflow_dispatch:
@@ -73,7 +73,22 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -sdk "$SDK"
 
-            # ── Build (unsigned) ────────────────────────────────────────────
+      # ── Build (unsigned) ────────────────────────────────────────────
+
+      - name: Ensure SPM resource bundles exist
+        run: |
+          # Xcode 16 auto-generates "[CP] Embed Swift Package Resources"
+          # build phases that lstat() resource bundles from transitive SPM
+          # deps (swift-transformers_Hub.bundle, swift-crypto_Crypto.bundle).
+          # If SwiftPM didn't build them yet, the lstat() fails fatally.
+          PRODUCTS_DIR="$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos"
+          mkdir -p "$PRODUCTS_DIR"
+          for bundle in swift-transformers_Hub.bundle swift-crypto_Crypto.bundle; do
+            if [ ! -e "$PRODUCTS_DIR/$bundle" ]; then
+              mkdir -p "$PRODUCTS_DIR/$bundle"
+              echo "Created placeholder: $PRODUCTS_DIR/$bundle"
+            fi
+          done
 
       - name: Build unsigned app (clean)
         run: |
