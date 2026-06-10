@@ -1,187 +1,167 @@
-﻿name: Build Volocal IPA
-
-on:
-  workflow_dispatch:
-    inputs:
-      configuration:
-        description: 'Build configuration'
-        required: true
-        default: 'release'
-        type: choice
-        options:
-          - debug
-          - release
-  push:
+name: Build Volocal IPA
+on:  
+  workflow_dispatch:    
+    inputs:      
+      configuration:        
+        description: 'Build configuration'        
+        required: true        
+        default: 'Release'        
+        type: choice        
+        options:          
+          - Debug          
+          - Release  
+  push:    
+    branches: [ main ]  
+  pull_request:    
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+concurrency:  
+  group: ${{ github.workflow }}-${{ github.ref }}  
   cancel-in-progress: true
-
-env:
-  SCHEME: Volocal
-  CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.configuration || 'release' }}
-  SDK: iphoneos
+env:  
+  SCHEME: Volocal  
+  CONFIGURATION: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.configuration || 'Release' }}  
+  SDK: iphoneos  
   DERIVED_DATA: ${{ github.workspace }}/DerivedData
-
-jobs:
-  build:
-    name: Build and export IPA
-    runs-on: macos-15
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      # ── Caching ──────────────────────────────────────────────────────
-
-      - name: Cache SwiftPM packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved') }}
-          restore-keys: |
-            ${{ runner.os }}-swiftpm-
-
-      # DerivedData is NOT cached because inter-configuration stale
-      # bundle resources cause lstat() errors (e.g. Debug .bundle paths
-      # left behind when building Release). It's cheaper to rebuild.
-
-      # ── Toolchain ───────────────────────────────────────────────────
-
-      - name: Select Xcode
-        run: |
-          ls /Applications/ | grep Xcode
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          xcodebuild -version
-
-      - name: Install xcbeautify
-        run: brew install xcbeautify
-
-      - name: Resolve SPM dependencies
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -scheme "$SCHEME" \
-            -configuration "$CONFIGURATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -sdk "$SDK"
-
-      # ── Build (unsigned) ────────────────────────────────────────────
-
-      - name: Ensure SPM resource bundles exist
-        run: |
-          # Xcode 16 auto-generates "[CP] Embed Swift Package Resources"
-          # build phases that lstat() resource bundles from transitive SPM
-          # deps (swift-transformers_Hub.bundle, swift-crypto_Crypto.bundle).
-          # If SwiftPM didn't build them yet, the lstat() fails fatally.
-          PRODUCTS_DIR="$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos"
-          mkdir -p "$PRODUCTS_DIR"
-          for bundle in swift-transformers_Hub.bundle swift-crypto_Crypto.bundle; do
-            if [ ! -e "$PRODUCTS_DIR/$bundle" ]; then
-              mkdir -p "$PRODUCTS_DIR/$bundle"
-              echo "Created placeholder: $PRODUCTS_DIR/$bundle"
-            fi
-          done
-
-      - name: Build unsigned app (clean)
-        run: |
-          set -o pipefail
-          xcodebuild clean build \
-            -scheme "$SCHEME" \
-            -configuration "$CONFIGURATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -sdk "$SDK" \
-            -destination "generic/platform=iOS" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGN_ENTITLEMENTS="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            DEVELOPMENT_TEAM="" \
-            2>&1 | xcbeautify --renderer github-actions
-
-      # ── Unit Tests (Simulator) ───────────────────────────────────────
-
-      - name: Run unit tests
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          SIMULATOR=$(xcrun simctl list devices available -j \
-            | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          devices = data.get('devices', {})
-          for runtime in sorted(devices.keys(), reverse=True):
-              for dev in devices[runtime]:
-                  if 'iPhone' in dev['name'] and dev['isAvailable']:
-                      print(dev['name'])
-                      sys.exit(0)
-          print('iPhone 16')
-          ")
-          echo "Using simulator: $SIMULATOR"
-          xcodebuild test \
-            -scheme "$SCHEME" \
-            -configuration Debug \
-            -derivedDataPath "$DERIVED_DATA" \
-            -destination "platform=iOS Simulator,name=$SIMULATOR" \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | xcbeautify --renderer github-actions || true
-
-      # ── Package Unsigned IPA ────────────────────────────────────────
-
-      - name: Create unsigned IPA
-        if: success()
-        run: |
-          set -euo pipefail
-          APP_PATH=$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos" \
-            -name "*.app" -maxdepth 1 -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "::error::No .app bundle found in DerivedData build products"
-            ls -la "$DERIVED_DATA/Build/Products/" 2>/dev/null || echo "Build products directory not found"
-            exit 1
-          fi
-          APP_NAME=$(basename "$APP_PATH" .app)
-          echo "Found app bundle: $APP_PATH ($APP_NAME)"
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          zip -qr "${APP_NAME}.ipa" Payload/
-          echo "ipa_name=${APP_NAME}" >> "$GITHUB_ENV"
-          echo "Created ${APP_NAME}.ipa ($(du -sh "${APP_NAME}.ipa" | cut -f1))"
-
-      # ── Upload Artifact ─────────────────────────────────────────────
-
-      - name: Upload unsigned IPA
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Volocal-${{ env.CONFIGURATION }}-${{ github.sha }}
-          path: ${{ env.ipa_name }}.ipa
-          if-no-files-found: error
-          retention-days: 30
-
-      # ── Build Summary ───────────────────────────────────────────────
-
-      - name: Build summary
-        if: always()
-        run: |
-          echo "## Volocal Build Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Scheme | $SCHEME |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Configuration | $CONFIGURATION |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Code Signed | No (unsigned) |" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f "${ipa_name:-Volocal}.ipa" ]; then
-            echo "| IPA Size | $(du -sh "${ipa_name:-Volocal}.ipa" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| IPA | ✅ Uploaded |" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "| IPA | ❌ Not created |" >> "$GITHUB_STEP_SUMMARY"
+jobs:  
+  build:    
+    name: Build and export IPA    
+    runs-on: macos-15    
+    timeout-minutes: 60    
+    steps:      
+      - name: Checkout repository        
+        uses: actions/checkout@v4        
+        with:          
+          submodules: true      
+      # ── Caching ──────────────────────────────────────────────────────      
+      - name: Cache SwiftPM packages        
+        uses: actions/cache@v4        
+        with:          
+          path: |            
+            ~/Library/Caches/org.swift.swiftpm            
+            ~/.swiftpm          
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved') }}          
+          restore-keys: |            
+            ${{ runner.os }}-swiftpm-      
+      # DerivedData is NOT cached because inter-configuration stale      
+      # bundle resources cause lstat() errors (e.g. Debug .bundle paths      
+      # left behind when building Release). It's cheaper to rebuild.      
+      # ── Toolchain ───────────────────────────────────────────────────      
+      - name: Select Xcode        
+        run: |          
+          ls /Applications/ | grep Xcode          
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer          
+          xcodebuild -version      
+      - name: Install xcbeautify        
+        run: brew install xcbeautify      
+      - name: Resolve SPM dependencies        
+        run: |          
+          xcodebuild -resolvePackageDependencies \            
+            -scheme "$SCHEME" \            
+            -configuration "$CONFIGURATION" \            
+            -derivedDataPath "$DERIVED_DATA" \            
+            -sdk "$SDK"      
+      # ── Build (unsigned) ────────────────────────────────────────────      
+      - name: Ensure SPM resource bundles exist        
+        run: |          
+          # Create bundles for all possible configurations to prevent lstat() failures          
+          # Xcode 16 auto-generates "[CP] Embed Swift Package Resources" build phases that          
+          # lstat() resource bundles from transitive SPM deps.          
+          for config in Debug Release; do            
+            for sdk in iphoneos iphonesimulator; do              
+              PRODUCTS_DIR="$DERIVED_DATA/Build/Products/${config}-${sdk}"              
+              mkdir -p "$PRODUCTS_DIR"              
+              for bundle in swift-transformers_Hub.bundle swift-crypto_Crypto.bundle; do                
+                if [ ! -e "$PRODUCTS_DIR/$bundle" ]; then                  
+                  mkdir -p "$PRODUCTS_DIR/$bundle"                  
+                  echo "Created placeholder: $PRODUCTS_DIR/$bundle"                
+                fi              
+              done            
+            done          
+          done      
+      - name: Build unsigned app        
+        run: |          
+          set -o pipefail          
+          xcodebuild build \            
+            -scheme "$SCHEME" \            
+            -configuration "$CONFIGURATION" \            
+            -derivedDataPath "$DERIVED_DATA" \            
+            -sdk "$SDK" \            
+            -destination "generic/platform=iOS" \            
+            CODE_SIGNING_ALLOWED=NO \            
+            CODE_SIGNING_REQUIRED=NO \            
+            CODE_SIGN_IDENTITY="" \            
+            CODE_SIGN_ENTITLEMENTS="" \            
+            PROVISIONING_PROFILE_SPECIFIER="" \            
+            DEVELOPMENT_TEAM="" \            
+            2>&1 | xcbeautify --renderer github-actions      
+      # ── Unit Tests (Simulator) ───────────────────────────────────────      
+      - name: Run unit tests        
+        continue-on-error: true        
+        run: |          
+          set -o pipefail          
+          SIMULATOR=$(xcrun simctl list devices available -j \            
+            | python3 -c "          
+          import json, sys          
+          data = json.load(sys.stdin)          
+          devices = data.get('devices', {})          
+          for runtime in sorted(devices.keys(), reverse=True):              
+              for dev in devices[runtime]:                  
+                  if 'iPhone' in dev['name'] and dev['isAvailable']:                      
+                      print(dev['name'])                      
+                      sys.exit(0)          
+          print('iPhone 16')          
+          ")          
+          echo "Using simulator: $SIMULATOR"          
+          xcodebuild test \            
+            -scheme "$SCHEME" \            
+            -configuration Debug \            
+            -derivedDataPath "$DERIVED_DATA" \            
+            -destination "platform=iOS Simulator,name=$SIMULATOR" \            
+            CODE_SIGNING_ALLOWED=NO \            
+            2>&1 | xcbeautify --renderer github-actions || true      
+      # ── Package Unsigned IPA ────────────────────────────────────────      
+      - name: Create unsigned IPA        
+        if: success()        
+        run: |          
+          set -euo pipefail          
+          APP_PATH=$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos" \            
+            -name "*.app" -maxdepth 1 -type d | head -1)          
+          if [ -z "$APP_PATH" ]; then            
+            echo "::error::No .app bundle found in DerivedData build products"            
+            ls -la "$DERIVED_DATA/Build/Products/" 2>/dev/null || echo "Build products directory not found"            
+            exit 1          
+          fi          
+          APP_NAME=$(basename "$APP_PATH" .app)          
+          echo "Found app bundle: $APP_PATH ($APP_NAME)"          
+          mkdir -p Payload          
+          cp -R "$APP_PATH" Payload/          
+          zip -qr "${APP_NAME}.ipa" Payload/          
+          echo "ipa_name=${APP_NAME}" >> "$GITHUB_ENV"          
+          echo "Created ${APP_NAME}.ipa ($(du -sh "${APP_NAME}.ipa" | cut -f1))"      
+      # ── Upload Artifact ─────────────────────────────────────────────      
+      - name: Upload unsigned IPA        
+        if: success()        
+        uses: actions/upload-artifact@v4        
+        with:          
+          name: Volocal-${{ env.CONFIGURATION }}-${{ github.sha }}          
+          path: ${{ env.ipa_name }}.ipa          
+          if-no-files-found: error          
+          retention-days: 30      
+      # ── Build Summary ───────────────────────────────────────────────      
+      - name: Build summary        
+        if: always()        
+        run: |          
+          echo "## Volocal Build Results" >> "$GITHUB_STEP_SUMMARY"          
+          echo "" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"          
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Scheme | $SCHEME |" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Configuration | $CONFIGURATION |" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Code Signed | No (unsigned) |" >> "$GITHUB_STEP_SUMMARY"          
+          if [ -f "${ipa_name:-Volocal}.ipa" ]; then            
+            echo "| IPA Size | $(du -sh "${ipa_name:-Volocal}.ipa" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"            
+            echo "| IPA | ✅ Uploaded |" >> "$GITHUB_STEP_SUMMARY"          
+          else            
+            echo "| IPA | ❌ Not created |" >> "$GITHUB_STEP_SUMMARY"          
           fi
