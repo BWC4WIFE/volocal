@@ -44,7 +44,8 @@ final class TTSManager: ObservableObject {
             }
             logger.info("TTS warmup done")
         } catch {
-            self.error = "TTS init failed: \(error.localizedDescription)"
+                        self.error = "TTS init failed: \(error.localizedDescription)"
+            logger.error("TTS init failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -106,7 +107,7 @@ final class TTSManager: ObservableObject {
                 }
             } catch {
                 if !Task.isCancelled {
-                    logger.error("speak failed: \(error.localizedDescription)")
+                                        logger.error("speak failed: \(error.localizedDescription, privacy: .public)")
                     self.error = "TTS failed: \(error.localizedDescription)"
                 }
             }

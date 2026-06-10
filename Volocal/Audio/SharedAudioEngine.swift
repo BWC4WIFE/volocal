@@ -73,7 +73,7 @@ final class SharedAudioEngine: ObservableObject {
             logger.info("SharedAudioEngine started (TTS ready)")
         } catch {
             self.error = "Audio engine start failed: \(error.localizedDescription)"
-            logger.error("SharedAudioEngine start failed: \(error.localizedDescription)")
+            logger.error("SharedAudioEngine start failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -111,7 +111,7 @@ final class SharedAudioEngine: ObservableObject {
                 try eng.outputNode.setVoiceProcessingEnabled(true)
                 logger.info("Voice processing AEC enabled")
             } catch {
-                logger.warning("Voice processing not available: \(error.localizedDescription)")
+                logger.warning("Voice processing not available: \(error.localizedDescription, privacy: .public)")
             }
 
             // Install tap — format: nil lets VP set the correct format.
@@ -144,7 +144,7 @@ final class SharedAudioEngine: ObservableObject {
             inputCaptureActive = true
             logger.info("Input capture started with VP AEC")
         } catch {
-            logger.error("Failed to start input capture: \(error.localizedDescription)")
+            logger.error("Failed to start input capture: \(error.localizedDescription, privacy: .public)")
             self.error = "Mic capture failed: \(error.localizedDescription)"
         }
     }

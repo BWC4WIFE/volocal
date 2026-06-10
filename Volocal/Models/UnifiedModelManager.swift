@@ -178,7 +178,7 @@ final class UnifiedModelManager: ObservableObject {
         case .failure(let error):
             modelStates[.llm] = .error(error.localizedDescription)
             self.error = "LLM download failed: \(error.localizedDescription)"
-            logger.error("LLM download failed: \(error.localizedDescription)")
+            logger.error("LLM download failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -200,7 +200,7 @@ final class UnifiedModelManager: ObservableObject {
         } catch {
             modelStates[.stt] = .error(error.localizedDescription)
             self.error = "STT download failed: \(error.localizedDescription)"
-            logger.error("STT download failed: \(error.localizedDescription)")
+            logger.error("STT download failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -220,7 +220,7 @@ final class UnifiedModelManager: ObservableObject {
         } catch {
             modelStates[.tts] = .error(error.localizedDescription)
             self.error = "TTS download failed: \(error.localizedDescription)"
-            logger.error("TTS download failed: \(error.localizedDescription)")
+            logger.error("TTS download failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

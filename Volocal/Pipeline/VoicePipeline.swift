@@ -80,7 +80,7 @@ final class VoicePipeline: ObservableObject {
             do {
                 try await llmManager.loadModel(path: path)
             } catch {
-                logger.error("LLM load failed: \(error.localizedDescription)")
+                                logger.error("LLM load failed: \(error.localizedDescription, privacy: .public)")
                 currentError = "LLM failed to load: \(error.localizedDescription)"
                 loadingStatus = nil
                 // Don't set isReady — stay on loading screen with error

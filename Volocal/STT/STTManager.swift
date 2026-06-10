@@ -121,12 +121,12 @@ final class STTManager: ObservableObject {
                     } catch {
                         logger.warning(
                             "VadManager init failed, using energy-based VAD: "
-                                + "\(error.localizedDescription)"
-                        )
+                                + "\(error.localizedDescription, privacy: .public)"
+                            )
                     }
         } catch {
                     self.error = "STT init failed: \(error.localizedDescription)"
-                    logger.error("STT init failed: \(error.localizedDescription)")
+                                        logger.error("STT init failed: \(error.localizedDescription, privacy: .public)")
                 }
             }
 
@@ -262,9 +262,9 @@ final class STTManager: ObservableObject {
             let result = try await vad.processStreamingChunk(
                 chunk,
                 state: state,
-                config: VadSegmentationConfig(
-                    minSilenceDuration: 0.5,
+                                config: VadSegmentationConfig(
                     minSpeechDuration: 0.15,
+                    minSilenceDuration: 0.5,
                     maxSpeechDuration: 14.0,
                     speechPadding: 0.1
                 ),
@@ -287,8 +287,8 @@ final class STTManager: ObservableObject {
                 }
             }
         } catch {
-            logger.error(
-                "VAD stream error: \(error.localizedDescription)"
+                        logger.error(
+                "VAD stream error: \(error.localizedDescription, privacy: .public)"
             )
             // Fallback: assume voice is active to avoid clipping speech
             if !hasFiredSpeechDetected {
@@ -341,8 +341,8 @@ final class STTManager: ObservableObject {
                 self.onPartialResult?(trimmedText)
             }
         } catch {
-            logger.debug(
-                "Partial transcription failed: \(error.localizedDescription)"
+                        logger.debug(
+                "Partial transcription failed: \(error.localizedDescription, privacy: .public)"
             )
         }
     }
@@ -354,8 +354,8 @@ final class STTManager: ObservableObject {
     ) async {
         do {
             let duration = Double(samples.count) / 16_000.0
-            logger.debug(
-                "Transcribing \(samples.count) samples (\(duration, specifier: "%.1f")s)"
+                        logger.debug(
+                "Transcribing \(samples.count) samples (\(String(format: "%.1f", duration))s)"
             )
 
             let text = try await manager.transcribe(
@@ -381,8 +381,8 @@ final class STTManager: ObservableObject {
         } catch {
             await MainActor.run {
                 guard !self.isStopping else { return }
-                logger.error(
-                    "Transcription failed: \(error.localizedDescription)"
+                                logger.error(
+                    "Transcription failed: \(error.localizedDescription, privacy: .public)"
                 )
             }
         }
