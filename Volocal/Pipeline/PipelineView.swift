@@ -3,6 +3,7 @@ import SwiftUI
 struct PipelineView: View {
     @EnvironmentObject var metrics: SystemMetrics
     @EnvironmentObject var pipeline: VoicePipeline
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -84,6 +85,13 @@ struct PipelineView: View {
             }
             .navigationTitle("Volocal")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         pipeline.resetChat()
@@ -92,6 +100,9 @@ struct PipelineView: View {
                     }
                     .disabled(pipeline.conversationHistory.isEmpty)
                 }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
             }
         }
     }

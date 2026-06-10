@@ -123,6 +123,49 @@ final class UnifiedModelManager: ObservableObject {
         }
     }
 
+    // MARK: - Export
+
+    func exportModels(to folderURL: URL) async {
+        guard folderURL.startAccessingSecurityScopedResource() else {
+            self.error = "Permission denied to access folder."
+            return
+        }
+        
+        let modelsDir = ModelRegistry.modelsDirectory
+        let llmFilename = ModelRegistry.llmFilename
+
+        do {
+            try await Task.detached {
+                defer { folderURL.stopAccessingSecurityScopedResource() }
+                let fm = FileManager.default
+                
+                // 1. Export LLM
+                let llmSource = modelsDir.appendingPathComponent(llmFilename)
+                let llmDest = folderURL.appendingPathComponent(llmFilename)
+                if fm.fileExists(atPath: llmSource.path) {
+                    if fm.fileExists(atPath: llmDest.path) {
+                        try fm.removeItem(at: llmDest)
+                    }
+                    try fm.copyItem(at: llmSource, to: llmDest)
+                }
+
+                // 2. Export FluidAudio caches
+                if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                    let fluidSource = cachesDir.appendingPathComponent("fluidaudio")
+                    let fluidDest = folderURL.appendingPathComponent("fluidaudio")
+                    if fm.fileExists(atPath: fluidSource.path) {
+                        if fm.fileExists(atPath: fluidDest.path) {
+                            try fm.removeItem(at: fluidDest)
+                        }
+                        try fm.copyItem(at: fluidSource, to: fluidDest)
+                    }
+                }
+            }.value
+        } catch {
+            self.error = "Export failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Download
 
     func downloadAllModels() async {

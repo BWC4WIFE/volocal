@@ -97,8 +97,9 @@ final class SharedAudioEngine: ObservableObject {
     func beginInputCapture() {
         guard let eng = engine, !inputCaptureActive else { return }
 
-        guard AVAudioApplication.shared.recordPermission == .granted else {
-            AVAudioApplication.requestRecordPermission { [weak self] granted in
+        let session = AVAudioSession.sharedInstance()
+        guard session.recordPermission == .granted else {
+            session.requestRecordPermission { [weak self] granted in
                 Task { @MainActor in
                     if granted {
                         self?.beginInputCapture()
