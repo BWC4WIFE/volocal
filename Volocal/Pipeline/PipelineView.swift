@@ -213,37 +213,37 @@ struct SettingsView: View {
                     }
                 }
             }
-            .fileImporter(
-                isPresented: $isExportFolderPresented,
-                allowedContentTypes: [.folder],
-                allowsMultipleSelection: false
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    if let folderURL = urls.first {
-                        exportTo(folderURL: folderURL)
-                    }
-                case .failure(let error):
-                    modelManager.error = "File selection failed: \(error.localizedDescription)"
-                }
-            }
-            .alert("Export Successful", isPresented: $showExportSuccess) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("Models have been successfully exported to the selected folder.")
+            .sheet(isPresented: $isExportFolderPresented) {
+                ExportDocumentPicker(urls: exportURLs)
+                    .ignoresSafeArea()
             }
         }
     }
     
-    private func exportTo(folderURL: URL) {
-        isExporting = true
-        modelManager.error = nil // Clear previous errors
-        Task {
-            await modelManager.exportModels(to: folderURL)
-            isExporting = false
-            if modelManager.error == nil {
-                showExportSuccess = true
+    private var exportURLs: [URL] {
+        var urls: [URL] = []
+        let fm = FileManager.default
+        let llmPath = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
+        if fm.fileExists(atPath: llmPath.path) {
+            urls.append(llmPath)
+        }
+        if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let fluidPath = cachesDir.appendingPathComponent("fluidaudio")
+            if fm.fileExists(atPath: fluidPath.path) {
+                urls.append(fluidPath)
             }
         }
+        return urls
     }
+}
+
+struct ExportDocumentPicker: UIViewControllerRepresentable {
+    let urls: [URL]
+    
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting: urls, asCopy: true)
+        return picker
+    }
+    
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
 }
