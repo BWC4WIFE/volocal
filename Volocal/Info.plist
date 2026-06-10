@@ -24,6 +24,10 @@
 	<string>Volocal needs microphone access for voice conversations.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
