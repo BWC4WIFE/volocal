@@ -120,8 +120,7 @@ final class STTManager: ObservableObject {
                         logger.info("VadManager ready")
                     } catch {
                         logger.warning(
-                            "VadManager init failed, using energy-based VAD: "
-                                \(error.localizedDescription, privacy: .public)"
+                            "VadManager init failed, using energy-based VAD: \(error.localizedDescription, privacy: .public)"
                             )
                     }
         } catch {
@@ -132,7 +131,9 @@ final class STTManager: ObservableObject {
 
     func startListening() {
         guard !isListening, asrManager != nil else {
-            if asrManager == nil {  = "STT not initialized" }
+            if asrManager == nil {  
+                                  errorMessage = "STT not initialized" 
+            }
             return
         }
         guard let sharedAudio else {
