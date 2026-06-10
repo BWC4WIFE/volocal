@@ -97,8 +97,9 @@ final class SharedAudioEngine: ObservableObject {
     func beginInputCapture() {
         guard let eng = engine, !inputCaptureActive else { return }
 
-        guard AVAudioApplication.shared.recordPermission == .granted else {
-            AVAudioApplication.requestRecordPermission { [weak self] granted in
+        let session = AVAudioSession.sharedInstance()
+        guard session.recordPermission == .granted else {
+            session.requestRecordPermission { [weak self] granted in
                 Task { @MainActor in
                     if granted {
                         self?.beginInputCapture()
@@ -127,10 +128,12 @@ final class SharedAudioEngine: ObservableObject {
                 logger.warning("Voice processing not available: \(error.localizedDescription, privacy: .public)")
             }
 
-            // Install tap — format: nil lets VP set the correct format.
-            // Engine is stopped so the graph can be modified safely.
+            // Install tap — explicitly request Float32 format to prevent silent Int16 buffers
             let audioBridge = self.bridge
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { buffer, _ in
+            let hwFormat = inputNode.outputFormat(forBus: 0)
+            let tapFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: hwFormat.sampleRate, channels: 1, interleaved: false)
+            
+            inputNode.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { buffer, _ in
                 // No speaking gate — VP handles echo cancellation.
                 // Mic stays active during TTS for barge-in (voice interruption).
 
