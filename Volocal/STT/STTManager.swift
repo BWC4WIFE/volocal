@@ -132,7 +132,7 @@ final class STTManager: ObservableObject {
     func startListening() {
         guard !isListening, asrManager != nil else {
             if asrManager == nil {  
-                                  errorMessage = "STT not initialized" 
+                                  error = "STT not initialized" 
             }
             return
         }
