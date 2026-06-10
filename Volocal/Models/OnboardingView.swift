@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Onboarding screen showing all model download status with per-model progress.
 struct OnboardingView: View {
     @EnvironmentObject var modelManager: UnifiedModelManager
     @State private var isDownloading = false
+    @State private var isImporting = false
 
     var body: some View {
         NavigationStack {
@@ -38,7 +40,7 @@ struct OnboardingView: View {
                 }
                 .padding(.horizontal)
 
-                                // Wi-Fi recommendation
+                // Wi-Fi recommendation
                 Text("Recommended: download over Wi-Fi (~3.6 GB total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -69,6 +71,18 @@ struct OnboardingView: View {
                 .disabled(isDownloading || modelManager.allModelsReady)
                 .padding(.horizontal)
 
+                Button {
+                    isImporting = true
+                } label: {
+                    Text("Import from Files")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isDownloading || modelManager.allModelsReady)
+                .padding(.horizontal)
+
                 if let error = modelManager.error {
                     Text(error)
                         .font(.caption)
@@ -79,6 +93,17 @@ struct OnboardingView: View {
                 Spacer().frame(height: 20)
             }
             .navigationTitle("")
+        }
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                Task {
+                    await modelManager.importModels(from: url)
+                }
+            }
         }
     }
 }
