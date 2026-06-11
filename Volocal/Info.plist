@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Volocal needs microphone access for voice conversations.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Volocal uses speech recognition to process your voice input.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 <key>UIFileSharingEnabled</key>

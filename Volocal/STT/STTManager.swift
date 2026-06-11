@@ -121,11 +121,13 @@ final class STTManager: ObservableObject {
                     } catch {
                         logger.warning(
                             "VadManager init failed, using energy-based VAD: \(error.localizedDescription, privacy: .public)"
-                            )
+                        )
+                        logToFile("WARNING: VadManager init failed: \(error.localizedDescription)")
                     }
-        } catch {
+                } catch {
                     self.error = "STT init failed: \(error.localizedDescription)"
-                                        logger.error("STT init failed: \(error.localizedDescription, privacy: .public)")
+                    logger.error("STT init failed: \(error.localizedDescription, privacy: .public)")
+                    logToFile("ERROR: STT init failed: \(error.localizedDescription)")
                 }
             }
 
@@ -288,9 +290,10 @@ final class STTManager: ObservableObject {
                 }
             }
         } catch {
-                        logger.error(
+            logger.error(
                 "VAD stream error: \(error.localizedDescription, privacy: .public)"
             )
+            logToFile("ERROR: VAD stream error: \(error.localizedDescription)")
             // Fallback: assume voice is active to avoid clipping speech
             if !hasFiredSpeechDetected {
                 hasFiredSpeechDetected = true
@@ -382,9 +385,10 @@ final class STTManager: ObservableObject {
         } catch {
             await MainActor.run {
                 guard !self.isStopping else { return }
-                                logger.error(
+                logger.error(
                     "Transcription failed: \(error.localizedDescription, privacy: .public)"
                 )
+                logToFile("ERROR: Transcription failed: \(error.localizedDescription)")
             }
         }
     }

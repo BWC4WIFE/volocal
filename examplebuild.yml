@@ -1,0 +1,161 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ad-hoc signed IPA
+    runs-on: macos-15
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+    
+
+      - name: Install xcbeautify
+        run: brew install xcbeautify
+
+      - name: Download iOS Platform
+        # Only run the massive download if the cache wasn't found
+        
+        run: xcodebuild -downloadPlatform iOS -buildVersion 18.2
+
+    
+
+      - name: Cache iOS Platform
+        id: ios-cache
+        uses: actions/cache@v4
+        with:
+          # This is the default path where Xcode stores downloaded simulator runtimes
+          path: /Library/Developer/CoreSimulator/Profiles/Runtimes
+          key: ios-platform-xcode-16
+
+      - name: Download iOS Platform
+        # Only run the massive download if the cache wasn't found
+        if: steps.ios-cache.outputs.cache-hit != 'true'
+        run: xcodebuild -downloadPlatform iOS
+
+      # Add this step to download the missing iOS 18 platform files
+      - name: Download iOS Platform
+        run: xcodebuild -downloadPlatform iOS
+
+        
+
+      
+      
+      
+      # ── 2. Xcode version ─────────────────────────────────────────────────
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      # ── 3. XcodeGen ──────────────────────────────────────────────────────
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate .xcodeproj
+        run: xcodegen generate --spec project.yml
+
+      - name: Clean Build
+        run: rm -rf "$RUNNER_TEMP/DerivedData"
+
+      - name: Show Info.plist path
+        run: |
+          xcodebuild -showBuildSettings -target RealtimeTranslator | grep INFOPLIST_FILE
+      - name: Verify Info.plist existence
+        run: |
+          # Replace 'Resources/Info.plist' with your actual path from project.yml
+          if [ -f "Resources/Info.plist" ]; then
+            echo "Info.plist found."
+          else
+            echo "Info.plist NOT found at expected path."
+            ls -R # List all files to find where it is
+          fi
+   # ── 3.5. Generate fresh Info.plist ──────────────────────────────────────
+      - name: Generate Info.plist with required keys
+        run: |
+          # Create a temporary directory for the new plist
+          mkdir -p "$RUNNER_TEMP/GeneratedInfo"
+          PLIST_PATH="$RUNNER_TEMP/GeneratedInfo/Info.plist"
+      
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string \$(DEVELOPMENT_LANGUAGE)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string RealtimeTranslator" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string \$(EXECUTABLE_NAME)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string \$(PRODUCT_BUNDLE_IDENTIFIER)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleName string RealtimeTranslator" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string \$(MARKETING_VERSION)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string \$(CURRENT_PROJECT_VERSION)" "$PLIST_PATH"
+      
+          # Privacy keys
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string RealtimeTranslator listens to Thai speech to translate it into English." "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string Used by the Apple Translate fallback engine to recognise Thai speech on-device." "$PLIST_PATH"
+      
+          # Background modes
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST_PATH"
+      
+          # Launch screen (empty dictionary)
+          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST_PATH"
+      
+          # Device capabilities
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities:0 string arm64" "$PLIST_PATH"
+      
+          # Orientation
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:1 string UIInterfaceOrientationPortraitUpsideDown" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:2 string UIInterfaceOrientationLandscapeLeft" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:3 string UIInterfaceOrientationLandscapeRight" "$PLIST_PATH"
+      
+          echo "Generated fresh Info.plist at $PLIST_PATH"
+      
+      # ── 4. Build (using the generated Info.plist) ──────────────────────────
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild clean build \
+            -project RealtimeTranslator.xcodeproj \
+            -scheme RealtimeTranslator \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -verbose \
+            INFOPLIST_FILE="$RUNNER_TEMP/GeneratedInfo/Info.plist" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            DEVELOPMENT_TEAM="" \
+            2>&1 | xcbeautify --renderer github-actions
+
+           
+      # ── 5. Firma ad-hoc + empaquetar IPA ─────────────────────────────────
+      - name: Ad-hoc sign and package IPA
+        run: |
+          APP=$(find "$RUNNER_TEMP/DerivedData" -name "*.app" \
+                ! -path "*/sim/*" ! -path "*iphonesimulator*" | head -1)
+          echo "App bundle: $APP"
+          # Firma ad-hoc: necesaria para LiveContainer y la mayoría de herramientas de sideload
+          codesign --force --deep --sign "-" "$APP"
+          mkdir -p Payload
+          cp -r "$APP" Payload/RealtimeTranslator.app
+          zip -r RealtimeTranslator.ipa Payload
+          echo "IPA size: $(du -sh RealtimeTranslator.ipa | cut -f1)"
+      # ── 6. Subir artefacto ────────────────────────────────────────────────
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RealtimeTranslator-IPA
+          path: RealtimeTranslator.ipa
+          retention-days: 14
+          if-no-files-found: error

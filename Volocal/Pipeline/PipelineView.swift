@@ -235,6 +235,30 @@ struct SettingsView: View {
                     Text("Export your models to a folder (like 'On My iPhone' or iCloud Drive) so you don't have to re-download them later.")
                 }
                 
+                Section {
+                    Button("Export Debug Logs") {
+                        Task {
+                            do {
+                                let logs = try getDebugLogs()
+                                // Activity view requires an active window scene
+                                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                                   let rootVC = windowScene.windows.first?.rootViewController {
+                                    let activityVC = UIActivityViewController(activityItems: [logs], applicationActivities: nil)
+                                    // Handle iPad popover
+                                    if let popover = activityVC.popoverPresentationController {
+                                        popover.sourceView = rootVC.view
+                                        popover.sourceRect = CGRect(x: UIScreen.main.bounds.midX, y: UIScreen.main.bounds.midY, width: 0, height: 0)
+                                        popover.permittedArrowDirections = []
+                                    }
+                                    rootVC.present(activityVC, animated: true)
+                                }
+                            } catch {
+                                logToFile("Failed to read logs: \(error)")
+                            }
+                        }
+                    }
+                }
+                
                 if let error = modelManager.error {
                     Section {
                         Text(error)

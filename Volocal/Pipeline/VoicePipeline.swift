@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Speech
 import Combine
 import os
 
@@ -63,17 +64,36 @@ final class VoicePipeline: ObservableObject {
     var metrics: SystemMetrics?
 
     func configure(llmModelPath: String?) async {
+        logToFile("VoicePipeline.configure() started")
+        
         // Explicitly request permission before starting the pipeline
         if AVAudioApplication.shared.recordPermission == .undetermined {
             let granted = await AVAudioApplication.requestRecordPermission()
             logger.info("Microphone permission: \(granted ? "granted" : "denied")")
+            logToFile("Microphone permission: \(granted ? "granted" : "denied")")
             if !granted {
                 self.currentError = "Microphone access denied. Please enable in Settings > Privacy & Security > Microphone."
                 return
             }
         } else if AVAudioApplication.shared.recordPermission == .denied {
+            logToFile("Microphone permission: denied")
             self.currentError = "Microphone access denied. Please enable in Settings > Privacy & Security > Microphone."
             return
+        }
+
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            let status = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status)
+                }
+            }
+            logger.info("Speech recognition permission: \(status.rawValue)")
+            logToFile("Speech recognition permission: \(status.rawValue)")
+            if status != .authorized {
+                self.currentError = "Speech recognition access denied. Enable in Settings > Privacy & Security > Speech Recognition."
+            }
+        } else if SFSpeechRecognizer.authorizationStatus() != .authorized {
+            logToFile("Speech recognition permission: not authorized (\(SFSpeechRecognizer.authorizationStatus().rawValue))")
         }
 
         // Start shared audio engine
