@@ -78,46 +78,43 @@ jobs:
               done            
             done          
           done      
+      # ── Generate Complete Info.plist ─────────────────────────────────
       - name: Generate Info.plist with required keys
         run: |
-          # Create a temporary directory for the new plist
           mkdir -p "$RUNNER_TEMP/GeneratedInfo"
           PLIST_PATH="$RUNNER_TEMP/GeneratedInfo/Info.plist"
-      
-          /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string \$(DEVELOPMENT_LANGUAGE)" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Volocal" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string \$(EXECUTABLE_NAME)" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.fikrikarim.volocal" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleName string Volocal" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$PLIST_PATH"
-      
-          # Privacy keys
-          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string Volocal needs microphone access for voice conversations." "$PLIST_PATH"
           
-          # File sharing
-          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST_PATH"
-      
-          # Launch screen (empty dictionary)
-          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST_PATH"
-      
-          # Device capabilities
-          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities array" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities:0 string arm64" "$PLIST_PATH"
-      
-          # Orientation
-          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST_PATH"
-          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST_PATH"
-      
-          echo "Generated fresh Info.plist at $PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Volocal" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string \$(EXECUTABLE_NAME)" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.fikrikarim.volocal" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleName string Volocal" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$PLIST_PATH" || true
+          
+          # Privacy keys - CRITICAL for your issue
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string Volocal needs microphone access for real-time voice conversations." "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSSpeechRecognitionUsageDescription string Volocal uses speech recognition to understand your voice input." "$PLIST_PATH" || true
+          
+          # Other required keys
+          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities array" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities:0 string arm64" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST_PATH" || true
+          
+          echo "=== Generated Info.plist ==="
           cat "$PLIST_PATH"
+          plutil -p "$PLIST_PATH"  # Validate
 
+      # ── Build ────────────────────────────────────────────────────────
       - name: Build app
-        run: |          
-          set -o pipefail          
+        run: |
+          set -o pipefail
           xcodebuild build \
             -scheme "$SCHEME" \
             -configuration "$CONFIGURATION" \
@@ -125,6 +122,7 @@ jobs:
             -sdk "$SDK" \
             -destination "generic/platform=iOS" \
             INFOPLIST_FILE="$RUNNER_TEMP/GeneratedInfo/Info.plist" \
+            INFOPLIST_PREPROCESS=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -132,6 +130,25 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             DEVELOPMENT_TEAM="" \
             2>&1 | xcbeautify --renderer github-actions
+
+      # ── Verify Plist in Built App (important debug step) ─────────────
+      - name: Verify Info.plist in built app
+        run: |
+          APP_PATH=$(find "$DERIVED_DATA/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -maxdepth 1 -type d | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No .app bundle found"
+            exit 1
+          fi
+          echo "Built app: $APP_PATH"
+          PLIST_IN_APP="$APP_PATH/Info.plist"
+          echo "=== Info.plist in built .app ==="
+          cat "$PLIST_IN_APP"
+          if plutil -p "$PLIST_IN_APP" | grep -q "NSMicrophoneUsageDescription"; then
+            echo "✅ NSMicrophoneUsageDescription present"
+          else
+            echo "::error::NSMicrophoneUsageDescription missing in final app!"
+            exit 1
+          fi
       # ── Unit Tests (Simulator) ───────────────────────────────────────      
       - name: Run unit tests        
         continue-on-error: true        
