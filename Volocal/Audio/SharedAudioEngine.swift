@@ -71,9 +71,10 @@ final class SharedAudioEngine: ObservableObject {
             self.isRunning = true
 
             logger.info("SharedAudioEngine started (TTS ready)")
-            self.error = "Audio engine start failed: \(error.localizedDescription)"
-            logger.error("SharedAudioEngine start failed: \(error.localizedDescription, privacy: .public)")
-            logToFile("ERROR: SharedAudioEngine start failed: \(error.localizedDescription)")
+        } catch let err as NSError {
+            self.error = "Audio engine start failed: \(err.localizedDescription)"
+            logger.error("SharedAudioEngine start failed: \(err.localizedDescription, privacy: .public)")
+            logToFile("ERROR: SharedAudioEngine start failed: \(err.localizedDescription)")
         }
     }
 
