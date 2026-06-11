@@ -78,7 +78,44 @@ jobs:
               done            
             done          
           done      
-      - name: Build unsigned app        
+      - name: Generate Info.plist with required keys
+        run: |
+          # Create a temporary directory for the new plist
+          mkdir -p "$RUNNER_TEMP/GeneratedInfo"
+          PLIST_PATH="$RUNNER_TEMP/GeneratedInfo/Info.plist"
+      
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string \$(DEVELOPMENT_LANGUAGE)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Volocal" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string \$(EXECUTABLE_NAME)" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.fikrikarim.volocal" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleName string Volocal" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$PLIST_PATH"
+      
+          # Privacy keys
+          /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string Volocal needs microphone access for voice conversations." "$PLIST_PATH"
+          
+          # File sharing
+          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :LSSupportsOpeningDocumentsInPlace bool true" "$PLIST_PATH"
+      
+          # Launch screen (empty dictionary)
+          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST_PATH"
+      
+          # Device capabilities
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UIRequiredDeviceCapabilities:0 string arm64" "$PLIST_PATH"
+      
+          # Orientation
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST_PATH"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST_PATH"
+      
+          echo "Generated fresh Info.plist at $PLIST_PATH"
+          cat "$PLIST_PATH"
+
+      - name: Build app
         run: |          
           set -o pipefail          
           xcodebuild build \
@@ -87,6 +124,7 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -sdk "$SDK" \
             -destination "generic/platform=iOS" \
+            INFOPLIST_FILE="$RUNNER_TEMP/GeneratedInfo/Info.plist" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -119,8 +157,8 @@ jobs:
             -destination "platform=iOS Simulator,name=$SIMULATOR" \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | xcbeautify --renderer github-actions || true
-      # ── Package Unsigned IPA ────────────────────────────────────────      
-      - name: Create unsigned IPA        
+      # ── Package & Ad-hoc Sign IPA ───────────────────────────────────
+      - name: Ad-hoc sign and package IPA        
         if: success()        
         run: |          
           set -euo pipefail          
@@ -133,13 +171,17 @@ jobs:
           fi          
           APP_NAME=$(basename "$APP_PATH" .app)          
           echo "Found app bundle: $APP_PATH ($APP_NAME)"          
+          
+          # Ad-hoc sign: required for sideloading tools like LiveContainer/AltStore
+          codesign --force --deep --sign "-" "$APP_PATH"
+          
           mkdir -p Payload          
           cp -R "$APP_PATH" Payload/          
           zip -qr "${APP_NAME}.ipa" Payload/          
           echo "ipa_name=${APP_NAME}" >> "$GITHUB_ENV"          
           echo "Created ${APP_NAME}.ipa ($(du -sh "${APP_NAME}.ipa" | cut -f1))"      
       # ── Upload Artifact ─────────────────────────────────────────────      
-      - name: Upload unsigned IPA        
+      - name: Upload IPA        
         if: success()        
         uses: actions/upload-artifact@v4        
         with:          
@@ -158,7 +200,7 @@ jobs:
           echo "| Branch | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"          
           echo "| Scheme | $SCHEME |" >> "$GITHUB_STEP_SUMMARY"          
           echo "| Configuration | $CONFIGURATION |" >> "$GITHUB_STEP_SUMMARY"          
-          echo "| Code Signed | No (unsigned) |" >> "$GITHUB_STEP_SUMMARY"          
+          echo "| Code Signed | Yes (Ad-hoc) |" >> "$GITHUB_STEP_SUMMARY"          
           if [ -f "${ipa_name:-Volocal}.ipa" ]; then            
             echo "| IPA Size | $(du -sh "${ipa_name:-Volocal}.ipa" | cut -f1) |" >> "$GITHUB_STEP_SUMMARY"            
             echo "| IPA | ✅ Uploaded |" >> "$GITHUB_STEP_SUMMARY"          
