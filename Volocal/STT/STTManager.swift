@@ -100,7 +100,7 @@ final class STTManager: ObservableObject {
                     let manager = Qwen3AsrManager()
                     try await manager.loadModels(
                         from: cacheDir,
-                        computeUnits: .all
+                        computeUnits: .cpuAndGPU // Fixes ANE compilation error -14 for f32 models
                     )
 
                     self.asrManager = manager
@@ -113,7 +113,7 @@ final class STTManager: ObservableObject {
                         let vad = try await VadManager(
                             config: VadConfig(
                                 defaultThreshold: 0.5,
-                                computeUnits: .all
+                                computeUnits: .cpuAndGPU
                             )
                         )
                         self.vadManager = vad
