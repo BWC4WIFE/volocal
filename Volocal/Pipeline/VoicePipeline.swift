@@ -63,6 +63,19 @@ final class VoicePipeline: ObservableObject {
     var metrics: SystemMetrics?
 
     func configure(llmModelPath: String?) async {
+        // Explicitly request permission before starting the pipeline
+        if AVAudioApplication.shared.recordPermission == .undetermined {
+            let granted = await AVAudioApplication.requestRecordPermission()
+            logger.info("Microphone permission: \(granted ? "granted" : "denied")")
+            if !granted {
+                self.currentError = "Microphone access denied. Please enable in Settings > Privacy & Security > Microphone."
+                return
+            }
+        } else if AVAudioApplication.shared.recordPermission == .denied {
+            self.currentError = "Microphone access denied. Please enable in Settings > Privacy & Security > Microphone."
+            return
+        }
+
         // Start shared audio engine
         sharedAudio.start()
 
