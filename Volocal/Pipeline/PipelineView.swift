@@ -1,9 +1,11 @@
 import SwiftUI
+import AVFoundation
 
 struct PipelineView: View {
     @EnvironmentObject var metrics: SystemMetrics
     @EnvironmentObject var pipeline: VoicePipeline
     @State private var showSettings = false
+    @State private var showPermissionAlert = false
 
     var body: some View {
         NavigationStack {
@@ -104,6 +106,34 @@ struct PipelineView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
+            .alert("Microphone Access Required", isPresented: $showPermissionAlert) {
+                Button("Open Settings", role: .cancel) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                Button("Later", role: .destructive) {}
+            } message: {
+                Text("Volocal needs microphone access to listen to your voice. Please enable it in Settings.")
+            }
+            .onAppear {
+                checkMicrophonePermission()
+            }
+        }
+    }
+
+    private func checkMicrophonePermission() {
+        let status = AVAudioApplication.shared.recordPermission
+        if status == .undetermined {
+            AVAudioApplication.requestRecordPermission { granted in
+                if !granted {
+                    Task { @MainActor in
+                        showPermissionAlert = true
+                    }
+                }
+            }
+        } else if status == .denied {
+            showPermissionAlert = true
         }
     }
 
@@ -155,6 +185,7 @@ struct SettingsView: View {
     @State private var isExporting = false
     @State private var showExportSuccess = false
     @State private var isExportFolderPresented = false
+    @State private var preparedExportURL: URL?
     
     var body: some View {
         NavigationStack {
@@ -182,14 +213,21 @@ struct SettingsView: View {
                 
                 Section {
                     Button {
-                        isExportFolderPresented = true
+                        isExporting = true
+                        Task {
+                            if let url = await modelManager.prepareExportBundle() {
+                                preparedExportURL = url
+                                isExportFolderPresented = true
+                            }
+                            isExporting = false
+                        }
                     } label: {
                         HStack {
                             if isExporting {
                                 ProgressView()
                                     .padding(.trailing, 8)
                             }
-                            Text(isExporting ? "Exporting Models..." : "Export Models to Folder")
+                            Text(isExporting ? "Preparing Export..." : "Export Models to Folder")
                         }
                     }
                     .disabled(isExporting)
@@ -214,26 +252,12 @@ struct SettingsView: View {
                 }
             }
             .sheet(isPresented: $isExportFolderPresented) {
-                ExportDocumentPicker(urls: exportURLs)
-                    .ignoresSafeArea()
+                if let url = preparedExportURL {
+                    ExportDocumentPicker(urls: [url])
+                        .ignoresSafeArea()
+                }
             }
         }
-    }
-    
-    private var exportURLs: [URL] {
-        var urls: [URL] = []
-        let fm = FileManager.default
-        let llmPath = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
-        if fm.fileExists(atPath: llmPath.path) {
-            urls.append(llmPath)
-        }
-        if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let fluidPath = cachesDir.appendingPathComponent("fluidaudio")
-            if fm.fileExists(atPath: fluidPath.path) {
-                urls.append(fluidPath)
-            }
-        }
-        return urls
     }
 }
 

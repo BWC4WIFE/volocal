@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Combine
 import os
 
@@ -124,6 +125,11 @@ final class VoicePipeline: ObservableObject {
     // MARK: - Pipeline Control
 
     private func startListening() {
+        if AVAudioApplication.shared.recordPermission == .denied {
+            currentError = "Microphone access denied. Please enable in Settings."
+            return
+        }
+        
         state = .listening
         currentTranscript = ""
         currentError = nil

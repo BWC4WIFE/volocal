@@ -97,23 +97,28 @@ final class UnifiedModelManager: ObservableObject {
         do {
             // 1. Import LLM
             let llmSource = folderURL.appendingPathComponent(ModelRegistry.llmFilename)
-            if fm.fileExists(atPath: llmSource.path) {
+            let isLLMDirect = folderURL.lastPathComponent == ModelRegistry.llmFilename
+            let llmToImport = isLLMDirect ? folderURL : llmSource
+            
+            if fm.fileExists(atPath: llmToImport.path) {
                 let llmDest = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
                 if fm.fileExists(atPath: llmDest.path) {
                     try fm.removeItem(at: llmDest)
                 }
-                try fm.copyItem(at: llmSource, to: llmDest)
+                try fm.copyItem(at: llmToImport, to: llmDest)
             }
 
-            // 2. Import FluidAudio caches (STT and TTS)
             let fluidSource = folderURL.appendingPathComponent("fluidaudio")
-            if fm.fileExists(atPath: fluidSource.path) {
+            let isFluidDirect = folderURL.lastPathComponent == "fluidaudio"
+            let fluidToImport = isFluidDirect ? folderURL : fluidSource
+            
+            if fm.fileExists(atPath: fluidToImport.path) {
                 if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
                     let fluidDest = cachesDir.appendingPathComponent("fluidaudio")
                     if fm.fileExists(atPath: fluidDest.path) {
                         try fm.removeItem(at: fluidDest)
                     }
-                    try fm.copyItem(at: fluidSource, to: fluidDest)
+                    try fm.copyItem(at: fluidToImport, to: fluidDest)
                 }
             }
 
@@ -125,44 +130,34 @@ final class UnifiedModelManager: ObservableObject {
 
     // MARK: - Export
 
-    func exportModels(to folderURL: URL) async {
-        guard folderURL.startAccessingSecurityScopedResource() else {
-            self.error = "Permission denied to access folder."
-            return
-        }
+    func prepareExportBundle() async -> URL? {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("VolocalModels")
+        let fm = FileManager.default
         
-        let modelsDir = ModelRegistry.modelsDirectory
-        let llmFilename = ModelRegistry.llmFilename
-
         do {
-            try await Task.detached {
-                defer { folderURL.stopAccessingSecurityScopedResource() }
-                let fm = FileManager.default
-                
-                // 1. Export LLM
-                let llmSource = modelsDir.appendingPathComponent(llmFilename)
-                let llmDest = folderURL.appendingPathComponent(llmFilename)
-                if fm.fileExists(atPath: llmSource.path) {
-                    if fm.fileExists(atPath: llmDest.path) {
-                        try fm.removeItem(at: llmDest)
-                    }
-                    try fm.copyItem(at: llmSource, to: llmDest)
+            if fm.fileExists(atPath: tempDir.path) {
+                try fm.removeItem(at: tempDir)
+            }
+            try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            
+            // 1. Copy LLM
+            let llmSource = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
+            if fm.fileExists(atPath: llmSource.path) {
+                try fm.copyItem(at: llmSource, to: tempDir.appendingPathComponent(ModelRegistry.llmFilename))
+            }
+            
+            // 2. Copy FluidAudio
+            if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                let fluidSource = cachesDir.appendingPathComponent("fluidaudio")
+                if fm.fileExists(atPath: fluidSource.path) {
+                    try fm.copyItem(at: fluidSource, to: tempDir.appendingPathComponent("fluidaudio"))
                 }
-
-                // 2. Export FluidAudio caches
-                if let cachesDir = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
-                    let fluidSource = cachesDir.appendingPathComponent("fluidaudio")
-                    let fluidDest = folderURL.appendingPathComponent("fluidaudio")
-                    if fm.fileExists(atPath: fluidSource.path) {
-                        if fm.fileExists(atPath: fluidDest.path) {
-                            try fm.removeItem(at: fluidDest)
-                        }
-                        try fm.copyItem(at: fluidSource, to: fluidDest)
-                    }
-                }
-            }.value
+            }
+            
+            return tempDir
         } catch {
-            self.error = "Export failed: \(error.localizedDescription)"
+            self.error = "Failed to prepare models for export: \(error.localizedDescription)"
+            return nil
         }
     }
 
