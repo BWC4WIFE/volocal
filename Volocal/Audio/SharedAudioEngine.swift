@@ -97,20 +97,6 @@ final class SharedAudioEngine: ObservableObject {
     func beginInputCapture() {
         guard let eng = engine, !inputCaptureActive else { return }
 
-        let session = AVAudioSession.sharedInstance()
-        guard session.recordPermission == .granted else {
-            session.requestRecordPermission { [weak self] granted in
-                Task { @MainActor in
-                    if granted {
-                        self?.beginInputCapture()
-                    } else {
-                        self?.error = "Microphone access denied"
-                    }
-                }
-            }
-            return
-        }
-
         do {
             // Stop engine to reconfigure audio graph with VP + input tap
             playerNode?.stop()
