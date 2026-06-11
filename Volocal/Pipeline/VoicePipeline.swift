@@ -103,7 +103,7 @@ final class VoicePipeline: ObservableObject {
         sttManager.sharedAudio = sharedAudio
         ttsManager.sharedAudio = sharedAudio
 
-                loadingStatus = "Loading speech recognition..."
+        loadingStatus = "Loading speech recognition..."
         metrics?.beginTracking("STT (Qwen3-ASR)")
         await sttManager.initialize()
         metrics?.endTracking("STT (Qwen3-ASR)")
@@ -114,7 +114,7 @@ final class VoicePipeline: ObservableObject {
             do {
                 try await llmManager.loadModel(path: path)
             } catch {
-                                logger.error("LLM load failed: \(error.localizedDescription, privacy: .public)")
+                logger.error("LLM load failed: \(error.localizedDescription, privacy: .public)")
                 currentError = "LLM failed to load: \(error.localizedDescription)"
                 loadingStatus = nil
                 // Don't set isReady — stay on loading screen with error
