@@ -113,7 +113,6 @@ final class VoicePipeline: ObservableObject {
             do {
                 try await llmManager.loadModel(path: path)
             } catch {
-                logger.error("LLM load failed: \(error.localizedDescription, privacy: .public)")
                 AppLogger.shared.error(.pipeline, "LLM load failed: \(error.localizedDescription)")
                 currentError = "LLM failed to load: \(error.localizedDescription)"
                 loadingStatus = nil
@@ -281,7 +280,6 @@ final class VoicePipeline: ObservableObject {
             while speakingTask != nil && !Task.isCancelled && myRevision == turnRevision {
                 if CFAbsoluteTimeGetCurrent() - waitStart > waitTimeout {
                     AppLogger.shared.warning(.pipeline, "Speaking wait timeout after \(waitTimeout)s")
-                    logger.warning("Speaking wait timeout after \(waitTimeout)s")
                     break
                 }
                 try? await Task.sleep(for: .milliseconds(100))

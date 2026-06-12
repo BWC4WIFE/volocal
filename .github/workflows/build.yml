@@ -91,8 +91,8 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleName string Volocal" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$PLIST_PATH" || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0.0" "$PLIST_PATH" || true
-          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.1.0" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 2" "$PLIST_PATH" || true
           
           # Privacy keys - CRITICAL for your issue
           /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string Volocal needs microphone access for real-time voice conversations." "$PLIST_PATH" || true

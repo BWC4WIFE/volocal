@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		01354C469FA9D25F726E9E9B /* ConversationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C45CAC47FAC2077DBF09D6 /* ConversationModel.swift */; };
+		0A1B2C3D4E5F6A7B8C9D0E1F /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7A8B9C0D1E2F /* AppLogger.swift */; };
 		0D9F1920DE3CEC8F2C3DBD60 /* SentenceBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C4761BFF59B998E24EDE71 /* SentenceBuffer.swift */; };
 		17BF9DA27B0DAE6195BCD874 /* ModelLoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9302DF6902D5B0BF3DBB94CC /* ModelLoadingView.swift */; };
 		2243A968E58E91F9B959F116 /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 6C0A850F27C81DF8E1F70522 /* LlamaSwift */; };
@@ -32,6 +33,7 @@
 
 /* Begin PBXFileReference section */
 		0043CAD5AC8C2FE722C4C74C /* PipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineView.swift; sourceTree = "<group>"; };
+		1A2B3C4D5E6F7A8B9C0D1E2F /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
 		174A173A569CA4BF546109AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2315FEB668579CE9B2410109 /* LLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMManager.swift; sourceTree = "<group>"; };
 		291266CACA92E5C922EAEAD6 /* ModelRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRegistry.swift; sourceTree = "<group>"; };
@@ -82,6 +84,7 @@
 		2DA99BDC6A4A6C4056009B5D /* Debug */ = {
 			isa = PBXGroup;
 			children = (
+				1A2B3C4D5E6F7A8B9C0D1E2F /* AppLogger.swift */,
 				CD55CD53C6E932FD238993AA /* MetricsOverlay.swift */,
 				C792F48B773B8AB7FB665186 /* SystemMetrics.swift */,
 			);
@@ -255,6 +258,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A1B2C3D4E5F6A7B8C9D0E1F /* AppLogger.swift in Sources */,
 				30DFFAC8BF2BD05FB1BEBF38 /* ContentView.swift in Sources */,
 				01354C469FA9D25F726E9E9B /* ConversationModel.swift in Sources */,
 				E3D279E7690E83F7E5B16D6C /* LLMManager.swift in Sources */,
@@ -285,14 +289,14 @@
 				CODE_SIGN_ENTITLEMENTS = Volocal/Volocal.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = FBS8R927D4;
 				GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Volocal/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fikrikarim.volocal;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -306,14 +310,14 @@
 				CODE_SIGN_ENTITLEMENTS = Volocal/Volocal.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = FBS8R927D4;
 				GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Volocal/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.fikrikarim.volocal;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 1;
