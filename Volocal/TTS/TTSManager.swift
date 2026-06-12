@@ -32,6 +32,8 @@ final class TTSManager: ObservableObject {
     /// then runs a dummy generation to warm up.
     func initialize() async {
         do {
+            AppLogger.shared.info(.tts, "Initializing PocketTTS...")
+            let initStart = CFAbsoluteTimeGetCurrent()
             let manager = PocketTtsManager()
             try await manager.initialize()
             self.engine = manager
@@ -43,9 +45,12 @@ final class TTSManager: ObservableObject {
                 break // One frame is enough
             }
             logger.info("TTS warmup done")
+            let initElapsed = CFAbsoluteTimeGetCurrent() - initStart
+            AppLogger.shared.info(.tts, "PocketTTS initialized and warmed up in \(String(format: "%.1f", initElapsed))s")
         } catch {
                         self.error = "TTS init failed: \(error.localizedDescription)"
             logger.error("TTS init failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.tts, "TTS init failed: \(error.localizedDescription)")
         }
     }
 
@@ -69,6 +74,7 @@ final class TTSManager: ObservableObject {
                 }
 
                 logger.info("speak start: \"\(text)\"")
+                AppLogger.shared.logOutput(.tts, text: text)
 
                 if !hasTrackedFirstInference {
                     metrics?.beginTracking("TTS (PocketTTS)")
@@ -92,6 +98,7 @@ final class TTSManager: ObservableObject {
 
                     if CFAbsoluteTimeGetCurrent() - genStart > speakTimeout {
                         logger.warning("speak timeout after \(speakTimeout)s, aborting")
+                        AppLogger.shared.warning(.tts, "Speak timeout after \(speakTimeout)s, aborting")
                         break
                     }
 
@@ -101,6 +108,8 @@ final class TTSManager: ObservableObject {
                 }
 
                 logger.info("speak generation done: \(chunkCount) chunks")
+                let genElapsed = CFAbsoluteTimeGetCurrent() - genStart
+                AppLogger.shared.info(.tts, "Speak generation done: \(chunkCount) chunks in \(String(format: "%.1f", genElapsed))s")
 
                 if !Task.isCancelled && chunkCount > 0 {
                     await sharedAudio.waitForPlaybackCompletion()
@@ -108,6 +117,7 @@ final class TTSManager: ObservableObject {
             } catch {
                 if !Task.isCancelled {
                                         logger.error("speak failed: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.shared.error(.tts, "Speak failed: \(error.localizedDescription)")
                     self.error = "TTS failed: \(error.localizedDescription)"
                 }
             }
@@ -115,6 +125,7 @@ final class TTSManager: ObservableObject {
                 self.isSpeaking = false
             }
             logger.info("speak end")
+            AppLogger.shared.info(.tts, "Speak end")
         }
         // Set speakTask BEFORE await to avoid race condition (bug #2.10)
         speakTask = task
@@ -123,6 +134,7 @@ final class TTSManager: ObservableObject {
 
     /// Stop all audio playback and cancel in-flight generation.
     func stop() {
+        AppLogger.shared.info(.tts, "TTS stopped (cancelled)")
         speakTask?.cancel()
         speakTask = nil
         sharedAudio?.stopPlayback()

@@ -7,6 +7,10 @@ struct VolocalApp: App {
     @StateObject private var pipeline = VoicePipeline()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        AppLogger.shared.startSession()
+    }
+
     var body: some Scene {
         WindowGroup {
             if !modelManager.allModelsReady {
@@ -33,10 +37,17 @@ struct VolocalApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
+                AppLogger.shared.info(.app, "Scene phase → active")
                 metrics.startMonitoring()
-            case .inactive, .background:
+            case .inactive:
+                AppLogger.shared.info(.app, "Scene phase → inactive")
                 metrics.stopMonitoring()
+            case .background:
+                AppLogger.shared.info(.app, "Scene phase → background")
+                metrics.stopMonitoring()
+                AppLogger.shared.endSession(reason: "background")
             @unknown default:
+                AppLogger.shared.warning(.app, "Scene phase → unknown")
                 break
             }
         }

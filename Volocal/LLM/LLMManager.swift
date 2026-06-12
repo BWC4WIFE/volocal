@@ -1,7 +1,4 @@
 import Foundation
-import os
-
-private let logger = Logger(subsystem: "com.volocal.app", category: "llm")
 
 /// Manages LLM inference using llama.cpp via the LlamaContext actor.
 @MainActor
@@ -16,6 +13,13 @@ final class LLMManager: ObservableObject {
 
     private let systemPrompt = """
     You are Volocal, a helpful voice assistant running entirely on-device. \
+    The user speaks Thai. Their input is Thai speech transcribed by an ASR model \
+    and may contain romanization artifacts or minor transcription errors. \
+    You MUST respond ONLY in English. \
+    Infer the intended Thai meaning even if the transcription is imperfect. \
+    Handle common Thai speech patterns: polite particles (ครับ/ค่ะ), \
+    topic-comment structure, pronoun dropping, and code-switching. \
+    If the user mixes Thai and English, respond naturally in English. \
     Keep responses concise and conversational — typically 1-3 sentences. \
     You're speaking out loud, so avoid markdown, code blocks, or lists. \
     Be friendly, direct, and natural.
@@ -24,7 +28,11 @@ final class LLMManager: ObservableObject {
     init() {}
 
     func loadModel(path: String) async throws {
+        AppLogger.shared.info(.llm, "Loading model from: \(path)")
+        let start = CFAbsoluteTimeGetCurrent()
         llamaContext = try LlamaContext.create(path: path, contextSize: 2048)
+        let elapsed = CFAbsoluteTimeGetCurrent() - start
+        AppLogger.shared.info(.llm, "Model loaded in \(String(format: "%.1f", elapsed))s")
     }
 
     /// Generate response from conversation history.
@@ -47,6 +55,11 @@ final class LLMManager: ObservableObject {
                     self.tokensPerSecond = 0
                 }
 
+                AppLogger.shared.info(.llm, "Generation started — history: \(history.count) messages")
+                if let lastUser = history.last(where: { $0.role == .user }) {
+                    AppLogger.shared.logInput(.llm, text: lastUser.text)
+                }
+
                 // Build multi-turn ChatML prompt from history
                 var fullPrompt = "<|im_start|>system\n\(systemPrompt)<|im_end|>\n"
                 for message in history {
@@ -55,6 +68,7 @@ final class LLMManager: ObservableObject {
                 }
                 // Pre-fill past <think> block to force non-thinking mode
                 fullPrompt += "<|im_start|>assistant\n<think>\n</think>\n"
+                AppLogger.shared.debug(.llm, "Prompt built: \(fullPrompt.count) chars, \(history.count) turns")
 
                 let startTime = CFAbsoluteTimeGetCurrent()
                 var tokenCount = 0
@@ -71,10 +85,7 @@ final class LLMManager: ObservableObject {
                         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
                         let tps = elapsed > 0 ? Double(tokenCount) / elapsed : 0
 
-                        #if DEBUG
-                        let hex = token.utf8.map { String(format: "%02x", $0) }.joined(separator: " ")
-                        logger.debug("token[\(tokenCount)]: \"\(token)\" hex=[\(hex)]")
-                        #endif
+
 
                         // Strip non-ASCII characters
                         let cleaned = String(token.unicodeScalars.filter { $0.isASCII })
@@ -88,9 +99,18 @@ final class LLMManager: ObservableObject {
                         }
                     }
                 } catch {
+                    AppLogger.shared.error(.llm, "Generation error: \(error.localizedDescription)")
                     await MainActor.run {
                         self.error = error.localizedDescription
                     }
+                }
+
+                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+                let finalTps = elapsed > 0 ? Double(tokenCount) / elapsed : 0
+                AppLogger.shared.info(.llm, "Generation complete — \(tokenCount) tokens in \(String(format: "%.1f", elapsed))s (\(String(format: "%.1f", finalTps)) tok/s)")
+                let finalResponse = await self.response
+                if !finalResponse.isEmpty {
+                    AppLogger.shared.logOutput(.llm, text: finalResponse)
                 }
 
                 await MainActor.run {
@@ -102,6 +122,7 @@ final class LLMManager: ObservableObject {
     }
 
     func stopGeneration() {
+        AppLogger.shared.info(.llm, "Generation stopped (cancelled)")
         generationTask?.cancel()
         generationTask = nil
         isGenerating = false

@@ -36,8 +36,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.fikrikarim.volocal
         INFOPLIST_FILE: Volocal/Info.plist
         CODE_SIGN_ENTITLEMENTS: Volocal/Volocal.entitlements
-        MARKETING_VERSION: "1.0.0"
-        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: "1.1.0"
+        CURRENT_PROJECT_VERSION: 2
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: FBS8R927D4
         TARGETED_DEVICE_FAMILY: 1

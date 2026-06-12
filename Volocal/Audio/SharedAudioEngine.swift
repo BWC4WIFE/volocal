@@ -71,9 +71,11 @@ final class SharedAudioEngine: ObservableObject {
             self.isRunning = true
 
             logger.info("SharedAudioEngine started (TTS ready)")
+            AppLogger.shared.info(.audio, "SharedAudioEngine started (TTS ready)")
         } catch let err as NSError {
             self.error = "Audio engine start failed: \(err.localizedDescription)"
             logger.error("SharedAudioEngine start failed: \(err.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.audio, "SharedAudioEngine start failed: \(err.localizedDescription)")
             logToFile("ERROR: SharedAudioEngine start failed: \(err.localizedDescription)")
         }
     }
@@ -89,6 +91,7 @@ final class SharedAudioEngine: ObservableObject {
         bridge.isSpeaking = false
         bridge.inputContinuation = nil
         logger.info("SharedAudioEngine stopped")
+        AppLogger.shared.info(.audio, "SharedAudioEngine stopped")
     }
 
     // MARK: - STT (Input Capture)
@@ -111,8 +114,10 @@ final class SharedAudioEngine: ObservableObject {
                 try inputNode.setVoiceProcessingEnabled(true)
                 try eng.outputNode.setVoiceProcessingEnabled(true)
                 logger.info("Voice processing AEC enabled")
+                AppLogger.shared.info(.audio, "Voice processing AEC enabled")
             } catch {
                 logger.warning("Voice processing not available: \(error.localizedDescription, privacy: .public)")
+                AppLogger.shared.warning(.audio, "Voice processing not available: \(error.localizedDescription)")
             }
 
             // Install tap — explicitly request Float32 format to prevent silent Int16 buffers
@@ -146,8 +151,10 @@ final class SharedAudioEngine: ObservableObject {
 
             inputCaptureActive = true
             logger.info("Input capture started with VP AEC")
+            AppLogger.shared.info(.audio, "Input capture started with VP AEC")
         } catch {
             logger.error("Failed to start input capture: \(error.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.audio, "Failed to start input capture: \(error.localizedDescription)")
             self.error = "Mic capture failed: \(error.localizedDescription)"
         }
     }
@@ -159,6 +166,7 @@ final class SharedAudioEngine: ObservableObject {
         inputCaptureActive = false
         bridge.inputContinuation = nil
         logger.info("Input capture stopped")
+        AppLogger.shared.info(.audio, "Input capture stopped")
     }
 
     // MARK: - TTS (Playback)

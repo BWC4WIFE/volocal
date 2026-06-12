@@ -90,6 +90,8 @@ final class STTManager: ObservableObject {
                     logger.info(
                         "Initializing Qwen3-ASR (\(self.modelVariant.rawValue))..."
                     )
+                    AppLogger.shared.info(.stt, "Initializing Qwen3-ASR (\(self.modelVariant.rawValue))...")
+                    let initStart = CFAbsoluteTimeGetCurrent()
 
                     let cacheDir = Qwen3AsrModels.defaultCacheDirectory(
                         variant: modelVariant
@@ -104,12 +106,15 @@ final class STTManager: ObservableObject {
                     )
 
                     self.asrManager = manager
+                    let initElapsed = CFAbsoluteTimeGetCurrent() - initStart
                     logger.info("Qwen3-ASR (\(self.modelVariant.rawValue)) ready")
+                    AppLogger.shared.info(.stt, "Qwen3-ASR (\(self.modelVariant.rawValue)) ready in \(String(format: "%.1f", initElapsed))s")
 
                     // Initialize FluidAudio's VadManager (Silero VAD CoreML) if available.
                     // Failure is non-fatal: falls back to energy-based silence detection.
                     do {
                         logger.info("Attempting VadManager init (Silero VAD)...")
+                        AppLogger.shared.info(.stt, "Initializing VadManager (Silero VAD)...")
                         let vad = try await VadManager(
                             config: VadConfig(
                                 defaultThreshold: 0.5,
@@ -118,15 +123,18 @@ final class STTManager: ObservableObject {
                         )
                         self.vadManager = vad
                         logger.info("VadManager ready")
+                        AppLogger.shared.info(.stt, "VadManager ready")
                     } catch {
                         logger.warning(
                             "VadManager init failed, using energy-based VAD: \(error.localizedDescription, privacy: .public)"
                         )
+                        AppLogger.shared.warning(.stt, "VadManager init failed, using energy-based VAD: \(error.localizedDescription)")
                         logToFile("WARNING: VadManager init failed: \(error.localizedDescription)")
                     }
                 } catch {
                     self.error = "STT init failed: \(error.localizedDescription)"
                     logger.error("STT init failed: \(error.localizedDescription, privacy: .public)")
+                    AppLogger.shared.error(.stt, "STT init failed: \(error.localizedDescription)")
                     logToFile("ERROR: STT init failed: \(error.localizedDescription)")
                 }
             }
@@ -179,6 +187,7 @@ final class STTManager: ObservableObject {
         hasFiredSpeechDetected = false
         error = nil
         logger.info("STT listening started (lang=\(self.language ?? "auto"))")
+        AppLogger.shared.info(.stt, "Listening started (lang=\(self.language ?? "auto"))")
     }
 
     /// Process an audio buffer from the mic tap.
@@ -282,10 +291,12 @@ final class STTManager: ObservableObject {
             if let event = result.event {
                 if event.isStart {
                     hasFiredSpeechDetected = true
+                    AppLogger.shared.info(.stt, "VAD: speech detected")
                     await MainActor.run {
                         self.onSpeechDetected?()
                     }
                 } else if event.isEnd {
+                    AppLogger.shared.info(.stt, "VAD: speech ended")
                     didSpeechEnd = true
                 }
             }
@@ -293,6 +304,7 @@ final class STTManager: ObservableObject {
             logger.error(
                 "VAD stream error: \(error.localizedDescription, privacy: .public)"
             )
+            AppLogger.shared.error(.stt, "VAD stream error: \(error.localizedDescription)")
             logToFile("ERROR: VAD stream error: \(error.localizedDescription)")
             // Fallback: assume voice is active to avoid clipping speech
             if !hasFiredSpeechDetected {
@@ -344,6 +356,7 @@ final class STTManager: ObservableObject {
                 self.partialResult = trimmedText
                 self.onPartialResult?(trimmedText)
             }
+            AppLogger.shared.debug(.stt, "Partial result: \"\(trimmedText)\"")
         } catch {
                         logger.debug(
                 "Partial transcription failed: \(error.localizedDescription, privacy: .public)"
@@ -358,9 +371,10 @@ final class STTManager: ObservableObject {
     ) async {
         do {
             let duration = Double(samples.count) / 16_000.0
-                        logger.debug(
+            logger.debug(
                 "Transcribing \(samples.count) samples (\(String(format: "%.1f", duration))s)"
             )
+            AppLogger.shared.info(.stt, "Transcribing \(samples.count) samples (\(String(format: "%.1f", duration))s)")
 
             let text = try await manager.transcribe(
                 audioSamples: samples,
@@ -382,12 +396,14 @@ final class STTManager: ObservableObject {
             }
 
             logger.info("Transcribed: \"\(trimmedText)\"")
+            AppLogger.shared.logInput(.stt, text: trimmedText)
         } catch {
             await MainActor.run {
                 guard !self.isStopping else { return }
                 logger.error(
                     "Transcription failed: \(error.localizedDescription, privacy: .public)"
                 )
+                AppLogger.shared.error(.stt, "Transcription failed: \(error.localizedDescription)")
                 logToFile("ERROR: Transcription failed: \(error.localizedDescription)")
             }
         }
@@ -502,6 +518,7 @@ final class STTManager: ObservableObject {
         lastPartialSampleCount = 0
 
         logger.info("STT listening stopped")
+        AppLogger.shared.info(.stt, "Listening stopped")
     }
 
         /// Reset ASR state for next utterance without stopping the mic.

@@ -39,6 +39,7 @@ final class UnifiedModelManager: ObservableObject {
 
     init() {
         checkExistingModels()
+        AppLogger.shared.info(.models, "Model manager initialized — states: LLM=\(modelStates[.llm]?.isReady == true ? "ready" : "not ready"), STT=\(modelStates[.stt]?.isReady == true ? "ready" : "not ready"), TTS=\(modelStates[.tts]?.isReady == true ? "ready" : "not ready")")
     }
 
     private func checkExistingModels() {
@@ -123,8 +124,10 @@ final class UnifiedModelManager: ObservableObject {
             }
 
             checkExistingModels()
+            AppLogger.shared.info(.models, "Models imported from \(folderURL.lastPathComponent)")
         } catch {
             self.error = "Import failed: \(error.localizedDescription)"
+            AppLogger.shared.error(.models, "Import failed: \(error.localizedDescription)")
         }
     }
 
@@ -195,6 +198,7 @@ final class UnifiedModelManager: ObservableObject {
 
     private func downloadLLM() async {
         modelStates[.llm] = .downloading(progress: 0)
+        AppLogger.shared.info(.models, "LLM download starting...")
 
         let destination = ModelRegistry.modelsDirectory.appendingPathComponent(ModelRegistry.llmFilename)
 
@@ -251,6 +255,7 @@ final class UnifiedModelManager: ObservableObject {
                 try FileManager.default.moveItem(at: tempURL, to: destination)
                 modelStates[.llm] = .downloaded
                 logger.info("LLM downloaded successfully")
+                AppLogger.shared.info(.models, "LLM downloaded successfully")
             } catch {
                 modelStates[.llm] = .error(error.localizedDescription)
                 self.error = "LLM download failed: \(error.localizedDescription)"
@@ -259,6 +264,7 @@ final class UnifiedModelManager: ObservableObject {
             modelStates[.llm] = .error(error.localizedDescription)
             self.error = "LLM download failed: \(error.localizedDescription)"
             logger.error("LLM download failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.models, "LLM download failed: \(error.localizedDescription)")
         }
     }
 
@@ -266,6 +272,7 @@ final class UnifiedModelManager: ObservableObject {
 
     private func downloadSTT() async {
         modelStates[.stt] = .downloading(progress: 0)
+        AppLogger.shared.info(.models, "STT download starting...")
 
         do {
                         try await Qwen3AsrModels.download(
@@ -277,10 +284,12 @@ final class UnifiedModelManager: ObservableObject {
             }
             modelStates[.stt] = .downloaded
             logger.info("STT models downloaded successfully")
+            AppLogger.shared.info(.models, "STT models downloaded successfully")
         } catch {
             modelStates[.stt] = .error(error.localizedDescription)
             self.error = "STT download failed: \(error.localizedDescription)"
             logger.error("STT download failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.models, "STT download failed: \(error.localizedDescription)")
         }
     }
 
@@ -288,6 +297,7 @@ final class UnifiedModelManager: ObservableObject {
 
     private func downloadTTS() async {
         modelStates[.tts] = .downloading(progress: 0)
+        AppLogger.shared.info(.models, "TTS download starting...")
 
         do {
             _ = try await PocketTtsResourceDownloader.ensureModels(language: .english) { [weak self] progress in
@@ -297,10 +307,12 @@ final class UnifiedModelManager: ObservableObject {
             }
             modelStates[.tts] = .downloaded
             logger.info("TTS models downloaded successfully")
+            AppLogger.shared.info(.models, "TTS models downloaded successfully")
         } catch {
             modelStates[.tts] = .error(error.localizedDescription)
             self.error = "TTS download failed: \(error.localizedDescription)"
             logger.error("TTS download failed: \(error.localizedDescription, privacy: .public)")
+            AppLogger.shared.error(.models, "TTS download failed: \(error.localizedDescription)")
         }
     }
 

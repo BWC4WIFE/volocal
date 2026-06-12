@@ -2,9 +2,6 @@ import Foundation
 import AVFoundation
 import Speech
 import Combine
-import os
-
-private let logger = Logger(subsystem: "com.volocal.app", category: "pipeline")
 
 /// Orchestrates the full voice pipeline: STT -> LLM -> TTS
 /// Listens for completed utterances from STT, generates LLM responses,
@@ -65,11 +62,13 @@ final class VoicePipeline: ObservableObject {
 
     func configure(llmModelPath: String?) async {
         logToFile("VoicePipeline.configure() started")
+        AppLogger.shared.info(.pipeline, "configure() started")
+        let configStart = CFAbsoluteTimeGetCurrent()
         
         // Explicitly request permission before starting the pipeline
         if AVAudioApplication.shared.recordPermission == .undetermined {
             let granted = await AVAudioApplication.requestRecordPermission()
-            logger.info("Microphone permission: \(granted ? "granted" : "denied")")
+            AppLogger.shared.info(.pipeline, "Microphone permission: \(granted ? "granted" : "denied")")
             logToFile("Microphone permission: \(granted ? "granted" : "denied")")
             if !granted {
                 self.currentError = "Microphone access denied. Please enable in Settings > Privacy & Security > Microphone."
@@ -87,7 +86,7 @@ final class VoicePipeline: ObservableObject {
                     continuation.resume(returning: status)
                 }
             }
-            logger.info("Speech recognition permission: \(status.rawValue)")
+            AppLogger.shared.info(.pipeline, "Speech recognition permission: \(status.rawValue)")
             logToFile("Speech recognition permission: \(status.rawValue)")
             if status != .authorized {
                 self.currentError = "Speech recognition access denied. Enable in Settings > Privacy & Security > Speech Recognition."
@@ -115,6 +114,7 @@ final class VoicePipeline: ObservableObject {
                 try await llmManager.loadModel(path: path)
             } catch {
                 logger.error("LLM load failed: \(error.localizedDescription, privacy: .public)")
+                AppLogger.shared.error(.pipeline, "LLM load failed: \(error.localizedDescription)")
                 currentError = "LLM failed to load: \(error.localizedDescription)"
                 loadingStatus = nil
                 // Don't set isReady — stay on loading screen with error
@@ -129,9 +129,12 @@ final class VoicePipeline: ObservableObject {
 
         loadingStatus = nil
         isReady = true
+        let configElapsed = CFAbsoluteTimeGetCurrent() - configStart
+        AppLogger.shared.info(.pipeline, "configure() complete in \(String(format: "%.1f", configElapsed))s — all models loaded")
     }
 
     func toggleListening() {
+        AppLogger.shared.debug(.pipeline, "toggleListening() — current state: \(state.label)")
         switch state {
         case .idle:
             startListening()
@@ -143,6 +146,7 @@ final class VoicePipeline: ObservableObject {
     }
 
     func resetChat() {
+        AppLogger.shared.info(.pipeline, "Chat reset")
         if state == .processing || state == .speaking {
             interrupt()
         }
@@ -160,9 +164,11 @@ final class VoicePipeline: ObservableObject {
     private func startListening() {
         if AVAudioApplication.shared.recordPermission == .denied {
             currentError = "Microphone access denied. Please enable in Settings."
+            AppLogger.shared.warning(.pipeline, "Start listening blocked — mic permission denied")
             return
         }
         
+        AppLogger.shared.info(.pipeline, "State → listening")
         state = .listening
         currentTranscript = ""
         currentError = nil
@@ -170,11 +176,13 @@ final class VoicePipeline: ObservableObject {
     }
 
     private func stopListening() {
+        AppLogger.shared.info(.pipeline, "State → idle (stop listening)")
         sttManager.stopListening()
         state = .idle
     }
 
     private func interrupt() {
+        AppLogger.shared.info(.pipeline, "Barge-in interrupt — cancelling generation/playback")
         turnRevision += 1
         ttsManager.stop()
         llmManager.stopGeneration()
@@ -229,6 +237,9 @@ final class VoicePipeline: ObservableObject {
         conversationHistory.append(userMessage)
         currentTranscript = text
 
+        AppLogger.shared.info(.pipeline, "State → processing")
+        AppLogger.shared.logInput(.pipeline, text: text)
+
         // Forward partial transcript
         partialTranscript = sttManager.partialResult
 
@@ -257,6 +268,7 @@ final class VoicePipeline: ObservableObject {
             if !currentResponse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let assistantMessage = ConversationMessage(role: .assistant, text: currentResponse)
                 conversationHistory.append(assistantMessage)
+                AppLogger.shared.logOutput(.pipeline, text: currentResponse)
                 trimHistory()
             }
             // Clear so the partial response bubble disappears
@@ -268,6 +280,7 @@ final class VoicePipeline: ObservableObject {
             let waitTimeout: TimeInterval = 60
             while speakingTask != nil && !Task.isCancelled && myRevision == turnRevision {
                 if CFAbsoluteTimeGetCurrent() - waitStart > waitTimeout {
+                    AppLogger.shared.warning(.pipeline, "Speaking wait timeout after \(waitTimeout)s")
                     logger.warning("Speaking wait timeout after \(waitTimeout)s")
                     break
                 }
@@ -275,6 +288,7 @@ final class VoicePipeline: ObservableObject {
             }
 
             guard !Task.isCancelled, myRevision == turnRevision else { return }
+            AppLogger.shared.info(.pipeline, "State → listening (turn complete)")
             state = .listening
         }
     }
@@ -290,6 +304,7 @@ final class VoicePipeline: ObservableObject {
 
         let sentence = sentenceQueue.removeFirst()
         let myRevision = turnRevision
+        AppLogger.shared.info(.pipeline, "State → speaking")
         state = .speaking
         speakingTask = Task {
             await ttsManager.speak(sentence)
@@ -302,6 +317,7 @@ final class VoicePipeline: ObservableObject {
     /// Trim conversation history to prevent context overflow.
     /// Keeps the most recent exchanges within maxHistoryEntries.
     private func trimHistory() {
+        let beforeCount = conversationHistory.count
         while conversationHistory.count > maxHistoryEntries {
             conversationHistory.removeFirst()
             // Remove in pairs if possible to keep user/assistant aligned
@@ -309,34 +325,21 @@ final class VoicePipeline: ObservableObject {
                 conversationHistory.removeFirst()
             }
         }
-    }
-}
-
-// MARK: - Global Debug Logging
-
-private let fileLoggerURL: URL = {
-    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-    return documents.appendingPathComponent("volocal-debug.log")
-}()
-
-public func logToFile(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let entry = "[\(timestamp)] \(message)\n"
-    do {
-        let data = entry.data(using: .utf8)!
-        if FileManager.default.fileExists(atPath: fileLoggerURL.path) {
-            let fileHandle = try FileHandle(forWritingTo: fileLoggerURL)
-            fileHandle.seekToEndOfFile()
-            fileHandle.write(data)
-            fileHandle.closeFile()
-        } else {
-            try data.write(to: fileLoggerURL)
+        let trimmed = beforeCount - conversationHistory.count
+        if trimmed > 0 {
+            AppLogger.shared.debug(.pipeline, "History trimmed: removed \(trimmed) entries, \(conversationHistory.count) remaining")
         }
-    } catch {
-        print("File logging failed: \(error)")
     }
 }
 
+// MARK: - Global Debug Logging (Legacy Wrappers)
+
+/// Legacy wrapper — forwards to AppLogger.
+public func logToFile(_ message: String) {
+    AppLogger.shared.info(.app, message)
+}
+
+/// Legacy wrapper — reads from AppLogger's log file.
 public func getDebugLogs() throws -> String {
-    try String(contentsOf: fileLoggerURL)
+    try AppLogger.shared.getLogs()
 }
