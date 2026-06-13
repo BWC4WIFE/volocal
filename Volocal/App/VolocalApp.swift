@@ -5,6 +5,7 @@ struct VolocalApp: App {
     @StateObject private var modelManager = UnifiedModelManager()
     @StateObject private var metrics = SystemMetrics()
     @StateObject private var pipeline = VoicePipeline()
+    @StateObject private var settings = AppSettings()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -23,7 +24,8 @@ struct VolocalApp: App {
                         pipeline.metrics = metrics
                         metrics.startMonitoring()
                         await pipeline.configure(
-                            llmModelPath: modelManager.llmModelPath
+                            llmModelPath: modelManager.llmModelPath,
+                            settings: settings
                         )
                     }
             } else {
@@ -31,6 +33,7 @@ struct VolocalApp: App {
                     .environmentObject(modelManager)
                     .environmentObject(metrics)
                     .environmentObject(pipeline)
+                    .environmentObject(settings)
                     .overlay { MetricsOverlay().environmentObject(metrics) }
             }
         }

@@ -165,12 +165,24 @@ struct MessageBubble: View {
         HStack {
             if message.role == .user { Spacer(minLength: 60) }
 
-            Text(message.text)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(message.role == .user ? Color.blue : Color(.systemGray5))
-                .foregroundStyle(message.role == .user ? .white : .primary)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                // Original Thai transcription (user messages only)
+                if let original = message.originalText {
+                    Text(original)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                // English translation / LLM output
+                Text(message.text)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(message.role == .user ? Color.blue : Color(.systemGray5))
+            .foregroundStyle(message.role == .user ? .white : .primary)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
 
             if message.role == .assistant { Spacer(minLength: 60) }
         }
@@ -182,6 +194,7 @@ struct MessageBubble: View {
 struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var modelManager: UnifiedModelManager
+    @EnvironmentObject var settings: AppSettings
     @State private var isExporting = false
     @State private var showExportSuccess = false
     @State private var isExportFolderPresented = false
@@ -210,7 +223,15 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                
+
+                Section(header: Text("Features")) {
+                    Toggle("Text-to-Speech", isOn: $settings.ttsEnabled)
+                    
+                    Toggle("Multi-Language Input", isOn: $settings.multiLanguageMode)
+                } footer: {
+                    Text("When Multi-Language is off, only Thai speech is recognized. Enable for auto-detection of any language.\n\nWhen Text-to-Speech is enabled, translations are spoken aloud.")
+                }
+
                 Section {
                     Button {
                         isExporting = true

@@ -38,6 +38,9 @@ final class STTManager: ObservableObject {
 
     /// ASR language. Default is Thai ("th"). Pass nil for auto-detection.
     var language: String? = "th"
+    
+    /// Whether to accept transcriptions in any language (true) or enforce Thai-only validation (false)
+    var multiLanguageMode: Bool = false
 
     /// Model variant: prefer f32 for stability in autoregressive decoding.
     private let modelVariant: Qwen3AsrVariant = .f32
@@ -351,6 +354,12 @@ final class STTManager: ObservableObject {
                 in: .whitespacesAndNewlines
             )
             guard !trimmedText.isEmpty else { return }
+            
+            if !multiLanguageMode && !containsThai(trimmedText) {
+                AppLogger.shared.debug(.stt, "Rejected non-Thai partial: \"\(trimmedText)\"")
+                return
+            }
+            
             await MainActor.run {
                 guard !self.isStopping else { return }
                 self.partialResult = trimmedText
@@ -386,6 +395,11 @@ final class STTManager: ObservableObject {
             )
             guard !trimmedText.isEmpty else { return }
 
+            if !multiLanguageMode && !containsThai(trimmedText) {
+                AppLogger.shared.debug(.stt, "Rejected non-Thai transcription: \"\(trimmedText)\"")
+                return
+            }
+
             await MainActor.run {
                 guard !self.isStopping else { return }
                                 self.transcript = trimmedText
@@ -410,6 +424,11 @@ final class STTManager: ObservableObject {
     }
 
     // MARK: - Audio Processing
+    
+    /// Checks if the text contains at least one Thai Unicode character.
+    private func containsThai(_ text: String) -> Bool {
+        text.unicodeScalars.contains { $0.value >= 0x0E01 && $0.value <= 0x0E5B }
+    }
 
     /// Extract mono Float32 samples from an AVAudioPCMBuffer,
     /// resampling to 16kHz if needed (Qwen3-ASR expects 16kHz mono).

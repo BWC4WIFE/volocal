@@ -23,6 +23,7 @@ final class VoicePipeline: ObservableObject {
     let ttsManager = TTSManager()
     let sharedAudio = SharedAudioEngine()
     private let sentenceBuffer = SentenceBuffer()
+    private var settings: AppSettings?
 
     private var generationTask: Task<Void, Never>?
     private var sentenceQueue: [String] = []
@@ -60,7 +61,8 @@ final class VoicePipeline: ObservableObject {
 
     var metrics: SystemMetrics?
 
-    func configure(llmModelPath: String?) async {
+    func configure(llmModelPath: String?, settings: AppSettings) async {
+        self.settings = settings
         logToFile("VoicePipeline.configure() started")
         AppLogger.shared.info(.pipeline, "configure() started")
         let configStart = CFAbsoluteTimeGetCurrent()
@@ -101,6 +103,10 @@ final class VoicePipeline: ObservableObject {
         // Inject shared audio into managers
         sttManager.sharedAudio = sharedAudio
         ttsManager.sharedAudio = sharedAudio
+        
+        sttManager.language = settings.multiLanguageMode ? nil : "th"
+        sttManager.multiLanguageMode = settings.multiLanguageMode
+        llmManager.multiLanguageMode = settings.multiLanguageMode
 
         loadingStatus = "Loading speech recognition..."
         metrics?.beginTracking("STT (Qwen3-ASR)")
@@ -122,9 +128,13 @@ final class VoicePipeline: ObservableObject {
             metrics?.endTracking("LLM (llama.cpp)")
         }
 
-        loadingStatus = "Loading text-to-speech..."
-        ttsManager.metrics = metrics
-        await ttsManager.initialize()
+        if settings.ttsEnabled {
+            loadingStatus = "Loading text-to-speech..."
+            ttsManager.metrics = metrics
+            await ttsManager.initialize()
+        } else {
+            AppLogger.shared.info(.pipeline, "TTS disabled by user — skipping init")
+        }
 
         loadingStatus = nil
         isReady = true
@@ -183,7 +193,9 @@ final class VoicePipeline: ObservableObject {
     private func interrupt() {
         AppLogger.shared.info(.pipeline, "Barge-in interrupt — cancelling generation/playback")
         turnRevision += 1
-        ttsManager.stop()
+        if settings?.ttsEnabled == true {
+            ttsManager.stop()
+        }
         llmManager.stopGeneration()
         generationTask?.cancel()
         generationTask = nil
@@ -232,7 +244,7 @@ final class VoicePipeline: ObservableObject {
         turnRevision += 1
         let myRevision = turnRevision
 
-        let userMessage = ConversationMessage(role: .user, text: text)
+        let userMessage = ConversationMessage(role: .user, text: text, originalText: text)
         conversationHistory.append(userMessage)
         currentTranscript = text
 
@@ -275,14 +287,16 @@ final class VoicePipeline: ObservableObject {
             currentResponse = ""
 
             // Wait for all queued sentences to finish speaking (with timeout)
-            let waitStart = CFAbsoluteTimeGetCurrent()
-            let waitTimeout: TimeInterval = 60
-            while speakingTask != nil && !Task.isCancelled && myRevision == turnRevision {
-                if CFAbsoluteTimeGetCurrent() - waitStart > waitTimeout {
-                    AppLogger.shared.warning(.pipeline, "Speaking wait timeout after \(waitTimeout)s")
-                    break
+            if self.settings?.ttsEnabled == true {
+                let waitStart = CFAbsoluteTimeGetCurrent()
+                let waitTimeout: TimeInterval = 60
+                while self.speakingTask != nil && !Task.isCancelled && myRevision == self.turnRevision {
+                    if CFAbsoluteTimeGetCurrent() - waitStart > waitTimeout {
+                        AppLogger.shared.warning(.pipeline, "Speaking wait timeout after \(waitTimeout)s")
+                        break
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
                 }
-                try? await Task.sleep(for: .milliseconds(100))
             }
 
             guard !Task.isCancelled, myRevision == turnRevision else { return }
@@ -292,6 +306,7 @@ final class VoicePipeline: ObservableObject {
     }
 
     private func handleSentence(_ sentence: String) {
+        guard settings?.ttsEnabled == true else { return }
         sentenceQueue.append(sentence)
         processNextSentence()
     }

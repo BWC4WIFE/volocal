@@ -2,8 +2,9 @@ import Foundation
 
 struct ConversationMessage: Identifiable {
     let id = UUID()
-    let role: Role
-    let text: String
+    var role: Role
+    var text: String
+    var originalText: String?
     let timestamp = Date()
 
     enum Role {
