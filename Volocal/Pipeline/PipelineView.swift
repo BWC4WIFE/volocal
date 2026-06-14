@@ -224,10 +224,12 @@ struct SettingsView: View {
                     }
                 }
 
-                Section(header: Text("Features")) {
+                Section {
                     Toggle("Text-to-Speech", isOn: $settings.ttsEnabled)
                     
                     Toggle("Multi-Language Input", isOn: $settings.multiLanguageMode)
+                } header: {
+                    Text("Features")
                 } footer: {
                     Text("When Multi-Language is off, only Thai speech is recognized. Enable for auto-detection of any language.\n\nWhen Text-to-Speech is enabled, translations are spoken aloud.")
                 }
