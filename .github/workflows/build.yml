@@ -53,8 +53,10 @@ jobs:
           xcodebuild -version      
       - name: Install xcbeautify        
         run: brew install xcbeautify      
-      - name: Resolve SPM dependencies        
+      - name: Reset & Resolve SPM dependencies        
         run: |          
+          echo "Resetting SwiftPM package caches..."
+          rm -rf ~/Library/Caches/org.swift.swiftpm ~/.swiftpm
           xcodebuild -resolvePackageDependencies \
             -scheme "$SCHEME" \
             -configuration "$CONFIGURATION" \
